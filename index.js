@@ -1,431 +1,1457 @@
-// EDtunnel - A Cloudflare Worker-based VLESS Proxy with WebSocket Transport
+/**
+ * YouTube Channel: https://youtube.com/@am_clubs
+ * Telegram Group: https://t.me/am_clubs
+ * GitHub Repository: https://github.com/amclubs
+ * Personal Blog: https://amclubs.blogspot.com
+ * Personal Blog: https://amclubss.com
+ */
+
 // @ts-ignore
 import { connect } from 'cloudflare:sockets';
 
-// ======================================
-// Configuration
-// ======================================
+// Generate your own UUID using the following command in PowerShell:
+// Powershell -NoExit -Command "[guid]::NewGuid()"
+let userID = '8f487032-5033-4a97-9587-cfb9eed82820';
+let kvUUID;
 
-/**
- * User configuration and settings
- * Generate UUID: [Windows] Press "Win + R", input cmd and run: Powershell -NoExit -Command "[guid]::NewGuid()"
- */
-let userID = 'e0d0c933-3b29-4b3d-bc03-ae14b274a06a';
-
-/**
- * Array of proxy server addresses with ports
- * Format: ['hostname:port', 'hostname:port']
- */
-const proxyIPs = ['nezha.jiyideweidao.link:443', 'zgo.lax.8416.top:443'];
-
-// Randomly select a proxy server from the pool
+// Proxy IPs to choose from
+let proxyIPs = [
+	'top.topaigc.cc',
+        'proxyip.woyaoshangwang.top',
+	'zh.5858598.xyz'
+];
+// Randomly select a proxy IP from the list
 let proxyIP = proxyIPs[Math.floor(Math.random() * proxyIPs.length)];
-let proxyPort = proxyIP.includes(':') ? proxyIP.split(':')[1] : '443';
+let proxyPort = 443;
+let proxyIpTxt = atob('aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2FtY2x1YnMvYW0tY2YtdHVubmVsL21haW4vcHJveHlpcC50eHQ=');
 
-// Alternative configurations:
-// Single proxy IP: let proxyIP = 'nezha.jiyideweidao.link';
-// IPv6 example: let proxyIP = "[2a01:4f8:c2c:123f:64:5:6810:c55a]"
+// Setting the socks5 will ignore proxyIP
+// Example:  user:pass@host:port  or  host:port
+let socks5 = '';
+let socks5Enable = false;
+let parsedSocks5 = {};
 
-/**
- * SOCKS5 proxy configuration
- * Format: 'username:password@host:port' or 'host:port'
- */
-let socks5Address = '';
+// https://cloudflare-dns.com/dns-query or https://dns.google/dns-query
+// DNS-over-HTTPS URL
+let dohURL = 'https://sky.rethinkdns.com/1:-Pf_____9_8A_AMAIgE8kMABVDDmKOHTAKg=';
 
-/**
- * SOCKS5 relay mode
- * When true: All traffic is proxied through SOCKS5
- * When false: Only Cloudflare IPs use SOCKS5
- */
-let socks5Relay = false;
+// Preferred address API interface
+let ipUrl = [
+
+];
+let ipUrlTxt = [
+	atob('aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2FtY2x1YnMvYW0tY2YtdHVubmVsL21haW4vaXB2NC50eHQ=')
+];
+let ipUrlCsv = [
+	// atob('aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL2FtY2x1YnMvYW0tY2YtdHVubmVsL21haW4vaXB2NC5jc3Y=')
+];
+// Preferred addresses with optional TLS subscription
+let ipLocal = [
+	'visa.tw:443#优选域名',
+	'icook.hk:443#优选域名',
+	'time.is:443#优选域名'
+];
+let noTLS = 'false';
+let sl = 5;
+
+let tagName = atob('YW1jbHVicw==');
+let subUpdateTime = 6; // Subscription update time in hours
+let timestamp = 4102329600000; // Timestamp for the end date (2099-12-31)
+let total = 99 * 1125899906842624; // PB (perhaps referring to bandwidth or total entries)
+let download = Math.floor(Math.random() * 1099511627776);
+let upload = download;
+
+// Network protocol type
+let network = 'ws'; // WebSocket
+
+// Fake UUID and hostname for configuration generation
+let fakeUserID;
+let fakeHostName;
+
+// Subscription and conversion details
+let subProtocol = 'https';
+let subConverter = atob('dXJsLnYxLm1r'); // Subscription conversion backend using Sheep's function
+let subConfig = "https://raw.githubusercontent.com/amclubs/ACL4SSR/main/Clash/config/ACL4SSR_Online_Full_MultiMode.ini"; // Subscription profile
+let fileName = 'AM%E7%A7%91%E6%8A%80';
+let isBase64 = true;
+
+let botToken = '';
+let chatID = '';
+
+let projectName = atob('YW1jbHVicy9hbS1jZi10dW5uZWw');
+let ytName = atob('aHR0cHM6Ly95b3V0dWJlLmNvbS9AYW1fY2x1YnM=');
+const httpPattern = /^http(s)?:\/\/.+/;
 
 if (!isValidUUID(userID)) {
-	throw new Error('uuid is not valid');
+	throw new Error('uuid is invalid');
 }
 
-let parsedSocks5Address = {};
-let enableSocks = false;
-
-/**
- * Main handler for the Cloudflare Worker. Processes incoming requests and routes them appropriately.
- * @param {import("@cloudflare/workers-types").Request} request - The incoming request object
- * @param {Object} env - Environment variables containing configuration
- * @param {string} env.UUID - User ID for authentication
- * @param {string} env.PROXYIP - Proxy server IP address
- * @param {string} env.SOCKS5 - SOCKS5 proxy configuration
- * @param {string} env.SOCKS5_RELAY - SOCKS5 relay mode flag
- * @returns {Promise<Response>} Response object
- */
 export default {
 	/**
 	 * @param {import("@cloudflare/workers-types").Request} request
-	 * @param {{UUID: string, PROXYIP: string, SOCKS5: string, SOCKS5_RELAY: string}} env
-	 * @param {import("@cloudflare/workers-types").ExecutionContext} _ctx
+	 * @param {{UUID: string, PROXYIP: string, DNS_RESOLVER_URL: string, NODE_ID: int, API_HOST: string, API_TOKEN: string}} env
+	 * @param {import("@cloudflare/workers-types").ExecutionContext} ctx
 	 * @returns {Promise<Response>}
-	 */
-	async fetch(request, env, _ctx) {
+	*/
+	async fetch(request, env, ctx) {
 		try {
-			const { UUID, PROXYIP, SOCKS5, SOCKS5_RELAY } = env;
-			userID = UUID || userID;
-			socks5Address = SOCKS5 || socks5Address;
-			socks5Relay = SOCKS5_RELAY || socks5Relay;
+			let {
+				UUID,
+				PROXYIP,
+				SOCKS5,
+				DNS_RESOLVER_URL,
+				IP_LOCAL,
+				IP_URL,
+				IP_URL_TXT,
+				IP_URL_CSV,
+				NO_TLS,
+				SL,
+				SUB_CONFIG,
+				SUB_CONVERTER,
+				SUB_NAME,
+				CF_EMAIL,
+				CF_KEY,
+				CF_ID = 0,
+				TG_TOKEN,
+				TG_ID,
+				//兼容
+				ADDRESSESAPI,
+			} = env;
+			const kvCheckResponse = await checkKVNamespaceBinding(env);
+			if (!kvCheckResponse) {
+				kvUUID = await getKVData(env);
+				// console.log(`kvUUID: ${kvUUID} \n `);
+			}
+			userID = (kvUUID || UUID || userID).toLowerCase();
 
-			// Handle proxy configuration
-			const proxyConfig = handleProxyConfig(PROXYIP);
-			proxyIP = proxyConfig.ip;
-			proxyPort = proxyConfig.port;
+			const url = new URL(request.url);
 
-			if (socks5Address) {
-				try {
-					const selectedSocks5 = selectRandomAddress(socks5Address);
-					parsedSocks5Address = socks5AddressParser(selectedSocks5);
-					enableSocks = true;
-				} catch (err) {
-					console.log(err.toString());
-					enableSocks = false;
+			PROXYIP = url.searchParams.get('PROXYIP') || PROXYIP;
+			if (PROXYIP) {
+				if (httpPattern.test(PROXYIP)) {
+					let proxyIpTxt = await addIpText(PROXYIP);
+					let ipUrlTxtAndCsv;
+					if (PROXYIP.endsWith('.csv')) {
+						ipUrlTxtAndCsv = await getIpUrlTxtAndCsv(noTLS, null, proxyIpTxt);
+
+					} else {
+						ipUrlTxtAndCsv = await getIpUrlTxtAndCsv(noTLS, proxyIpTxt, null);
+					}
+					const uniqueIpTxt = [...new Set([...ipUrlTxtAndCsv.txt, ...ipUrlTxtAndCsv.csv])];
+					proxyIP = uniqueIpTxt[Math.floor(Math.random() * uniqueIpTxt.length)];
+				} else {
+					proxyIPs = await addIpText(PROXYIP);
+					proxyIP = proxyIPs[Math.floor(Math.random() * proxyIPs.length)];
 				}
+			} else {
+				let proxyIpTxts = await addIpText(proxyIpTxt);
+				let ipUrlTxtAndCsv = await getIpUrlTxtAndCsv(noTLS, proxyIpTxts, null);
+				let updatedIps = ipUrlTxtAndCsv.txt.map(ip => `${tagName}${download}.${ip}`);
+				const uniqueIpTxt = [...new Set([...updatedIps, ...proxyIPs])];
+				proxyIP = uniqueIpTxt[Math.floor(Math.random() * uniqueIpTxt.length)];
+			}
+			const [ip, port] = proxyIP.split(':');
+			proxyIP = ip;
+			proxyPort = port || proxyPort;
+
+			socks5 = url.searchParams.get('SOCKS5') || SOCKS5 || socks5;
+			parsedSocks5 = await parseSocks5FromUrl(socks5, url);
+			if (parsedSocks5) {
+				socks5Enable = true;
 			}
 
-			const userIDs = userID.includes(',') ? userID.split(',').map(id => id.trim()) : [userID];
-			const url = new URL(request.url);
-			const host = request.headers.get('Host');
-			const requestedPath = url.pathname.substring(1); // Remove leading slash
-			const matchingUserID = userIDs.length === 1 ?
-				(requestedPath === userIDs[0] || 
-				 requestedPath === `sub/${userIDs[0]}` || 
-				 requestedPath === `bestip/${userIDs[0]}` ? userIDs[0] : null) :
-				userIDs.find(id => {
-					const patterns = [id, `sub/${id}`, `bestip/${id}`];
-					return patterns.some(pattern => requestedPath.startsWith(pattern));
-				});
+			dohURL = url.searchParams.get('DNS_RESOLVER_URL') || DNS_RESOLVER_URL || dohURL;
 
-			if (request.headers.get('Upgrade') !== 'websocket') {
-				if (url.pathname === '/cf') {
-					return new Response(JSON.stringify(request.cf, null, 4), {
-						status: 200,
-						headers: { "Content-Type": "application/json;charset=utf-8" },
+			IP_LOCAL = url.searchParams.get('IP_LOCAL') || IP_LOCAL;
+			if (IP_LOCAL) {
+				ipLocal = await addIpText(IP_LOCAL);
+			}
+			const newCsvUrls = [];
+			const newTxtUrls = [];
+			IP_URL = url.searchParams.get('IP_URL') || IP_URL;
+			if (IP_URL) {
+				ipUrlTxt = [];
+				ipUrl = await addIpText(IP_URL);
+				ipUrl = await getIpUrlTxtToArry(ipUrl);
+				ipUrl.forEach(url => {
+					if (getFileType(url) === 'csv') {
+						newCsvUrls.push(url);
+					} else {
+						newTxtUrls.push(url);
+					}
+				});
+			}
+			//兼容旧的，如果有IP_URL_TXT新的则不用旧的
+			ADDRESSESAPI = url.searchParams.get('ADDRESSESAPI') || ADDRESSESAPI;
+			IP_URL_TXT = url.searchParams.get('IP_URL_TXT') || IP_URL_TXT;
+			IP_URL_CSV = url.searchParams.get('IP_URL_CSV') || IP_URL_CSV;
+			if (ADDRESSESAPI) {
+				ipUrlTxt = await addIpText(ADDRESSESAPI);
+			}
+			if (IP_URL_TXT) {
+				ipUrlTxt = await addIpText(IP_URL_TXT);
+			}
+			if (IP_URL_CSV) {
+				ipUrlCsv = await addIpText(IP_URL_CSV);
+			}
+			ipUrlCsv = [...new Set([...ipUrlCsv, ...newCsvUrls])];
+			ipUrlTxt = [...new Set([...ipUrlTxt, ...newTxtUrls])];
+
+			noTLS = url.searchParams.get('NO_TLS') || NO_TLS || noTLS;
+			sl = url.searchParams.get('SL') || SL || sl;
+			subConfig = url.searchParams.get('SUB_CONFIG') || SUB_CONFIG || subConfig;
+			subConverter = url.searchParams.get('SUB_CONVERTER') || SUB_CONVERTER || subConverter;
+			fileName = url.searchParams.get('SUB_NAME') || SUB_NAME || fileName;
+			botToken = url.searchParams.get('TG_TOKEN') || TG_TOKEN || botToken;
+			chatID = url.searchParams.get('TG_ID') || TG_ID || chatID;
+
+			// Unified protocol for handling subconverters
+			const [subProtocol, subConverterWithoutProtocol] = (subConverter.startsWith("http://") || subConverter.startsWith("https://"))
+				? subConverter.split("://")
+				: [undefined, subConverter];
+			subConverter = subConverterWithoutProtocol;
+
+			// console.log(`proxyIPs: ${proxyIPs} \n proxyIP: ${proxyIP} \n ipLocal: ${ipLocal} \n ipUrl: ${ipUrl} \n ipUrlTxt: ${ipUrlTxt} `);
+
+			//const uuid = url.searchParams.get('uuid')?.toLowerCase() || 'null';
+			const ua = request.headers.get('User-Agent') || 'null';
+			const userAgent = ua.toLowerCase();
+			const host = request.headers.get('Host');
+			const upgradeHeader = request.headers.get('Upgrade');
+			const expire = Math.floor(timestamp / 1000);
+
+			// If WebSocket upgrade, handle WebSocket request
+			if (upgradeHeader === 'websocket') {
+				return await channelOverWSHandler(request);
+			}
+
+			fakeUserID = await getFakeUserID(userID);
+			fakeHostName = fakeUserID.slice(6, 9) + "." + fakeUserID.slice(13, 19);
+			console.log(`userID: ${userID}`);
+			console.log(`fakeUserID: ${fakeUserID}`);
+			// Handle routes based on the path
+			switch (url.pathname.toLowerCase()) {
+				case '/': {
+					return new Response(await nginx(), {
+						headers: {
+							'Content-Type': 'text/html; charset=UTF-8',
+							'referer': 'https://www.google.com/search?q=' + fileName,
+						},
 					});
 				}
 
-				if (matchingUserID) {
-					if (url.pathname === `/${matchingUserID}` || url.pathname === `/sub/${matchingUserID}`) {
-						const isSubscription = url.pathname.startsWith('/sub/');
-						const proxyAddresses = PROXYIP ? PROXYIP.split(',').map(addr => addr.trim()) : proxyIP;
-						const content = isSubscription ?
-							GenSub(matchingUserID, host, proxyAddresses) :
-							getConfig(matchingUserID, host, proxyAddresses);
-
-						return new Response(content, {
-							status: 200,
-							headers: {
-								"Content-Type": isSubscription ?
-									"text/plain;charset=utf-8" :
-									"text/html; charset=utf-8"
-							},
-						});
-					} else if (url.pathname === `/bestip/${matchingUserID}`) {
-						return fetch(`https://sub.xf.free.hr/auto?host=${host}&uuid=${matchingUserID}&path=/`, { headers: request.headers });
-					}
+				case `/${fakeUserID}`: {
+					// Disguise UUID node generation
+					const fakeConfig = await getchannelConfig(userID, host, 'CF-FAKE-UA', url);
+					return new Response(fakeConfig, { status: 200 });
 				}
-				return handleDefaultPath(url, request);
-			} else {
-				return await ProtocolOverWSHandler(request);
+
+				case `/${userID}`: {
+					// Handle real UUID requests and get node info
+					await sendMessage(
+						`#获取订阅 ${fileName}`,
+						request.headers.get('CF-Connecting-IP'),
+						`UA: ${userAgent}\n域名: ${url.hostname}\n入口: ${url.pathname + url.search}`
+					);
+
+					const channelConfig = await getchannelConfig(userID, host, userAgent, url);
+					const isMozilla = userAgent.includes('mozilla');
+
+					const config = await getCFConfig(CF_EMAIL, CF_KEY, CF_ID);
+					if (CF_EMAIL && CF_KEY) {
+						({ upload, download, total } = config);
+					}
+
+					// Prepare common headers
+					const commonHeaders = {
+						"Content-Type": isMozilla ? "text/html;charset=utf-8" : "text/plain;charset=utf-8",
+						"Profile-Update-Interval": `${subUpdateTime}`,
+						"Subscription-Userinfo": `upload=${upload}; download=${download}; total=${total}; expire=${expire}`,
+					};
+
+					// Add download headers if not a Mozilla browser
+					if (!isMozilla) {
+						commonHeaders["Content-Disposition"] = `attachment; filename=${fileName}; filename*=gbk''${fileName}`;
+					}
+
+					return new Response(channelConfig, {
+						status: 200,
+						headers: commonHeaders,
+					});
+				}
+
+				case `/${userID}/ui`: {
+					return await showKVPage(env);
+				}
+				case `/${userID}/get`: {
+					return getKVData(env);
+				}
+				case `/${userID}/set`: {
+					return setKVData(request, env);
+				}
+
+				default: {
+					// Serve the default nginx disguise page
+					return new Response(await nginx(), {
+						headers: {
+							'Content-Type': 'text/html; charset=UTF-8',
+							'referer': 'https://www.google.com/search?q=' + fileName,
+						},
+					});
+				}
 			}
 		} catch (err) {
-			return new Response(err.toString());
+			// Log error for debugging purposes
+			console.error('Error processing request:', err);
+			return new Response(`Error: ${err.message}`, { status: 500 });
 		}
 	},
 };
 
-/**
- * Handles default path requests when no specific route matches.
- * Generates and returns a cloud drive interface HTML page.
- * @param {URL} url - The URL object of the request
- * @param {Request} request - The incoming request object
- * @returns {Response} HTML response with cloud drive interface
- */
-async function handleDefaultPath(url, request) {
-	const host = request.headers.get('Host');
-	const DrivePage = `
-	  <!DOCTYPE html>
-	  <html lang="en">
-	  <head>
-		  <meta charset="UTF-8">
-		  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-		  <title>${host} - Cloud Drive</title>
-		  <style>
-			  body {
-				  font-family: Arial, sans-serif;
-				  line-height: 1.6;
-				  margin: 0;
-				  padding: 20px;
-				  background-color: #f4f4f4;
-			  }
-			  .container {
-				  max-width: 800px;
-				  margin: auto;
-				  background: white;
-				  padding: 20px;
-				  border-radius: 5px;
-				  box-shadow: 0 0 10px rgba(0,0,0,0.1);
-			  }
-			  h1 {
-				  color: #333;
-			  }
-			  .file-list {
-				  list-style-type: none;
-				  padding: 0;
-			  }
-			  .file-list li {
-				  background: #f9f9f9;
-				  margin-bottom: 10px;
-				  padding: 10px;
-				  border-radius: 3px;
-				  display: flex;
-				  align-items: center;
-			  }
-			  .file-list li:hover {
-				  background: #f0f0f0;
-			  }
-			  .file-icon {
-				  margin-right: 10px;
-				  font-size: 1.2em;
-			  }
-			  .file-link {
-				  text-decoration: none;
-				  color: #0066cc;
-				  flex-grow: 1;
-			  }
-			  .file-link:hover {
-				  text-decoration: underline;
-			  }
-			  .upload-area {
-				  margin-top: 20px;
-				  padding: 40px;
-				  background: #e9e9e9;
-				  border: 2px dashed #aaa;
-				  border-radius: 5px;
-				  text-align: center;
-				  cursor: pointer;
-				  transition: all 0.3s ease;
-			  }
-			  .upload-area:hover, .upload-area.drag-over {
-				  background: #d9d9d9;
-				  border-color: #666;
-			  }
-			  .upload-area h2 {
-				  margin-top: 0;
-				  color: #333;
-			  }
-			  #fileInput {
-				  display: none;
-			  }
-			  .upload-icon {
-				  font-size: 48px;
-				  color: #666;
-				  margin-bottom: 10px;
-			  }
-			  .upload-text {
-				  font-size: 18px;
-				  color: #666;
-			  }
-			  .upload-status {
-				  margin-top: 20px;
-				  font-style: italic;
-				  color: #666;
-			  }
-			  .file-actions {
-				  display: flex;
-				  gap: 10px;
-			  }
-			  .delete-btn {
-				  color: #ff4444;
-				  cursor: pointer;
-				  background: none;
-				  border: none;
-				  padding: 5px;
-			  }
-			  .delete-btn:hover {
-				  color: #ff0000;
-			  }
-			  .clear-all-btn {
-				  background-color: #ff4444;
-				  color: white;
-				  border: none;
-				  padding: 10px 15px;
-				  border-radius: 4px;
-				  cursor: pointer;
-				  margin-bottom: 20px;
-			  }
-			  .clear-all-btn:hover {
-				  background-color: #ff0000;
-			  }
-		  </style>
-	  </head>
-	  <body>
-		  <div class="container">
-			  <h1>Cloud Drive</h1>
-			  <p>Welcome to your personal cloud storage. Here are your uploaded files:</p>
-			  <button id="clearAllBtn" class="clear-all-btn">Clear All Files</button>
-			  <ul id="fileList" class="file-list">
-			  </ul>
-			  <div id="uploadArea" class="upload-area">
-				  <div class="upload-icon">📁</div>
-				  <h2>Upload a File</h2>
-				  <p class="upload-text">Drag and drop a file here or click to select</p>
-				  <input type="file" id="fileInput" hidden>
-			  </div>
-			  <div id="uploadStatus" class="upload-status"></div>
-		  </div>
-		  <script>
-			  function loadFileList() {
-				  const fileList = document.getElementById('fileList');
-				  const savedFiles = JSON.parse(localStorage.getItem('uploadedFiles')) || [];
-				  fileList.innerHTML = '';
-				  savedFiles.forEach((file, index) => {
-					  const li = document.createElement('li');
-					  li.innerHTML = \`
-						  <span class="file-icon">📄</span>
-						  <a href="https://ipfs.io/ipfs/\${file.Url.split('/').pop()}" class="file-link" target="_blank">\${file.Name}</a>
-						  <div class="file-actions">
-							  <button class="delete-btn" onclick="deleteFile(\${index})">
-								  <span class="file-icon">❌</span>
-							  </button>
-						  </div>
-					  \`;
-					  fileList.appendChild(li);
-				  });
-			  }
 
-			  function deleteFile(index) {
-				  const savedFiles = JSON.parse(localStorage.getItem('uploadedFiles')) || [];
-				  savedFiles.splice(index, 1);
-				  localStorage.setItem('uploadedFiles', JSON.stringify(savedFiles));
-				  loadFileList();
-			  }
+/** ---------------------Tools------------------------------ */
 
-			  document.getElementById('clearAllBtn').addEventListener('click', () => {
-				  if (confirm('Are you sure you want to clear all files?')) {
-					  localStorage.removeItem('uploadedFiles');
-					  loadFileList();
-				  }
-			  });
-
-			  loadFileList();
-
-			  const uploadArea = document.getElementById('uploadArea');
-			  const fileInput = document.getElementById('fileInput');
-			  const uploadStatus = document.getElementById('uploadStatus');
-
-			  uploadArea.addEventListener('dragover', (e) => {
-				  e.preventDefault();
-				  uploadArea.classList.add('drag-over');
-			  });
-
-			  uploadArea.addEventListener('dragleave', () => {
-				  uploadArea.classList.remove('drag-over');
-			  });
-
-			  uploadArea.addEventListener('drop', (e) => {
-				  e.preventDefault();
-				  uploadArea.classList.remove('drag-over');
-				  const files = e.dataTransfer.files;
-				  if (files.length) {
-					  handleFileUpload(files[0]);
-				  }
-			  });
-
-			  uploadArea.addEventListener('click', () => {
-				  fileInput.click();
-			  });
-
-			  fileInput.addEventListener('change', (e) => {
-				  const file = e.target.files[0];
-				  if (file) {
-					  handleFileUpload(file);
-				  }
-			  });
-
-			  async function handleFileUpload(file) {
-				  uploadStatus.textContent = \`Uploading: \${file.name}...\`;
-				  
-				  const formData = new FormData();
-				  formData.append('file', file);
-
-				  try {
-					  const response = await fetch('https://app.img2ipfs.org/api/v0/add', {
-						  method: 'POST',
-						  body: formData,
-						  headers: {
-							  'Accept': 'application/json',
-						  },
-					  });
-
-					  if (!response.ok) {
-						  throw new Error('Upload failed');
-					  }
-
-					  const result = await response.json();
-					  uploadStatus.textContent = \`File uploaded successfully! IPFS Hash: \${result.Hash}\`;
-					  
-					  const savedFiles = JSON.parse(localStorage.getItem('uploadedFiles')) || [];
-					  savedFiles.push(result);
-					  localStorage.setItem('uploadedFiles', JSON.stringify(savedFiles));
-					  
-					  loadFileList();
-					  
-				  } catch (error) {
-					  console.error('Error:', error);
-					  uploadStatus.textContent = 'Upload failed. Please try again.';
-				  }
-			  }
-		  </script>
-	  </body>
-	  </html>
-	`;
-
-	// 返回伪装的网盘页面
-	return new Response(DrivePage, {
-		headers: {
-			"content-type": "text/html;charset=UTF-8",
-		},
-	});
+export async function hashHex_f(string) {
+	const encoder = new TextEncoder();
+	const data = encoder.encode(string);
+	const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+	const hashArray = Array.from(new Uint8Array(hashBuffer));
+	const hashHex = hashArray.map(byte => byte.toString(16).padStart(2, '0')).join('');
+	return hashHex;
 }
 
 /**
- * Handles protocol over WebSocket requests by creating a WebSocket pair, accepting the WebSocket connection, and processing the protocol header.
- * @param {import("@cloudflare/workers-types").Request} request - The incoming request object
- * @returns {Promise<Response>} WebSocket response
+ * Checks if a given string is a valid UUID.
+ * Note: This is not a real UUID validation.
+ * @param {string} uuid The string to validate as a UUID.
+ * @returns {boolean} True if the string is a valid UUID, false otherwise.
  */
-async function ProtocolOverWSHandler(request) {
+function isValidUUID(uuid) {
+	const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[4][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+	return uuidRegex.test(uuid);
+}
 
-	/** @type {import("@cloudflare/workers-types").WebSocket[]} */
-	// @ts-ignore
+const byteToHex = [];
+for (let i = 0; i < 256; ++i) {
+	byteToHex.push((i + 256).toString(16).slice(1));
+}
+
+function unsafeStringify(arr, offset = 0) {
+	return (byteToHex[arr[offset + 0]] + byteToHex[arr[offset + 1]] + byteToHex[arr[offset + 2]] + byteToHex[arr[offset + 3]] + "-" + byteToHex[arr[offset + 4]] + byteToHex[arr[offset + 5]] + "-" + byteToHex[arr[offset + 6]] + byteToHex[arr[offset + 7]] + "-" + byteToHex[arr[offset + 8]] + byteToHex[arr[offset + 9]] + "-" + byteToHex[arr[offset + 10]] + byteToHex[arr[offset + 11]] + byteToHex[arr[offset + 12]] + byteToHex[arr[offset + 13]] + byteToHex[arr[offset + 14]] + byteToHex[arr[offset + 15]]).toLowerCase();
+}
+
+function stringify(arr, offset = 0) {
+	const uuid = unsafeStringify(arr, offset);
+	if (!isValidUUID(uuid)) {
+		throw TypeError("Stringified UUID is invalid");
+	}
+	return uuid;
+}
+
+async function getFakeUserID(userID) {
+	const date = new Date().toISOString().split('T')[0];
+	const rawString = `${userID}-${date}`;
+
+	const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(rawString));
+	const hashArray = Array.from(new Uint8Array(hashBuffer)).map(b => ('00' + b.toString(16)).slice(-2)).join('');
+
+	return `${hashArray.substring(0, 8)}-${hashArray.substring(8, 12)}-${hashArray.substring(12, 16)}-${hashArray.substring(16, 20)}-${hashArray.substring(20, 32)}`;
+}
+
+function revertFakeInfo(content, userID, hostName) {
+	//console.log(`revertFakeInfo-->: isBase64 ${isBase64} \n content: ${content}`);
+	if (isBase64) {
+		content = atob(content);//Base64 decrypt
+	}
+	content = content.replace(new RegExp(fakeUserID, 'g'), userID).replace(new RegExp(fakeHostName, 'g'), hostName);
+	if (isBase64) {
+		content = btoa(content);//Base64 encryption
+	}
+	return content;
+}
+
+/**
+ * Decodes a base64 string into an ArrayBuffer.
+ * @param {string} base64Str The base64 string to decode.
+ * @returns {{earlyData: ArrayBuffer|null, error: Error|null}} An object containing the decoded ArrayBuffer or null if there was an error, and any error that occurred during decoding or null if there was no error.
+ */
+function base64ToArrayBuffer(base64Str) {
+	if (!base64Str) {
+		return { earlyData: null, error: null };
+	}
+	try {
+		// go use modified Base64 for URL rfc4648 which js atob not support
+		base64Str = base64Str.replace(/-/g, '+').replace(/_/g, '/');
+		const decode = atob(base64Str);
+		const arryBuffer = Uint8Array.from(decode, (c) => c.charCodeAt(0));
+		return { earlyData: arryBuffer.buffer, error: null };
+	} catch (error) {
+		return { earlyData: null, error };
+	}
+}
+
+async function addIpText(envAdd) {
+	var addText = envAdd.replace(/[	|"'\r\n]+/g, ',').replace(/,+/g, ',');
+	//console.log(addText);
+	if (addText.charAt(0) == ',') {
+		addText = addText.slice(1);
+	}
+	if (addText.charAt(addText.length - 1) == ',') {
+		addText = addText.slice(0, addText.length - 1);
+	}
+	const add = addText.split(',');
+	// console.log(add);
+	return add;
+}
+
+function socks5Parser(socks5) {
+	let [latter, former] = socks5.split("@").reverse();
+	let username, password, hostname, port;
+
+	if (former) {
+		const formers = former.split(":");
+		if (formers.length !== 2) {
+			throw new Error('Invalid SOCKS address format: authentication must be in the "username:password" format');
+		}
+		[username, password] = formers;
+	}
+
+	const latters = latter.split(":");
+	port = Number(latters.pop());
+	if (isNaN(port)) {
+		throw new Error('Invalid SOCKS address format: port must be a number');
+	}
+
+	hostname = latters.join(":");
+	const isIPv6 = hostname.includes(":") && !/^\[.*\]$/.test(hostname);
+	if (isIPv6) {
+		throw new Error('Invalid SOCKS address format: IPv6 addresses must be enclosed in brackets, e.g., [2001:db8::1]');
+	}
+
+	//console.log(`socks5Parser-->: username ${username} \n password: ${password} \n hostname: ${hostname} \n port: ${port}`);
+	return { username, password, hostname, port };
+}
+
+async function parseSocks5FromUrl(socks5, url) {
+	if (/\/socks5?=/.test(url.pathname)) {
+		socks5 = url.pathname.split('5=')[1];
+	} else if (/\/socks[5]?:\/\//.test(url.pathname)) {
+		socks5 = url.pathname.split('://')[1].split('#')[0];
+	}
+
+	const authIdx = socks5.indexOf('@');
+	if (authIdx !== -1) {
+		let userPassword = socks5.substring(0, authIdx);
+		const base64Regex = /^(?:[A-Z0-9+/]{4})*(?:[A-Z0-9+/]{2}==|[A-Z0-9+/]{3}=)?$/i;
+		if (base64Regex.test(userPassword) && !userPassword.includes(':')) {
+			userPassword = atob(userPassword);
+		}
+		socks5 = `${userPassword}@${socks5.substring(authIdx + 1)}`;
+	}
+
+	if (socks5) {
+		try {
+			return socks5Parser(socks5);
+		} catch (err) {
+			console.log(err.toString());
+			return null;
+		}
+	}
+	return null;
+}
+
+function getFileType(url) {
+	const baseUrl = url.split('@')[0];
+
+	const extension = baseUrl.match(/\.(csv|txt)$/i);
+
+	if (extension) {
+		return extension[1].toLowerCase();
+	} else {
+		return 'txt';
+	}
+}
+
+async function getFileContentType(url) {
+	try {
+		const response = await fetch(url);
+		const text = await response.text();
+
+		if (text.includes(',')) {
+			return 'csv';
+		} else {
+			return 'txt';
+		}
+	} catch (error) {
+		console.error('Error fetching file:', error);
+		return null;
+	}
+}
+
+/** ---------------------Get data------------------------------ */
+
+let subParams = ['sub', 'base64', 'b64', 'clash', 'singbox', 'sb'];
+/**
+ * @param {string} userID
+ * @param {string | null} host
+ * @param {string} userAgent
+ * @param {string} _url
+ * @returns {Promise<string>}
+ */
+async function getchannelConfig(userID, host, userAgent, _url) {
+	// console.log(`------------getchannelConfig------------------`);
+	// console.log(`userID: ${userID} \n host: ${host} \n userAgent: ${userAgent} \n _url: ${_url}`);
+
+	userAgent = userAgent.toLowerCase();
+	let port = 443;
+	if (host.includes('.workers.dev')) {
+		port = 80;
+	}
+
+	if (userAgent.includes('mozilla') && !subParams.some(param => _url.searchParams.has(param))) {
+		const [v2ray, clash] = getConfigLink(userID, host, host, port, host);
+		return getHtmlResponse(socks5Enable, userID, host, v2ray, clash);
+	}
+
+	// Get node information
+	fakeHostName = getFakeHostName(host);
+	const ipUrlTxtAndCsv = await getIpUrlTxtAndCsv(noTLS, ipUrlTxt, ipUrlCsv);
+
+	// console.log(`txt: ${ipUrlTxtAndCsv.txt} \n csv: ${ipUrlTxtAndCsv.csv}`);
+	let content = await getSubscribeNode(userAgent, _url, host, fakeHostName, fakeUserID, noTLS, ipUrlTxtAndCsv.txt, ipUrlTxtAndCsv.csv);
+
+	return _url.pathname === `/${fakeUserID}` ? content : revertFakeInfo(content, userID, host);
+
+}
+
+function getHtmlResponse(socks5Enable, userID, host, v2ray, clash) {
+	const subRemark = `IP_LOCAL/IP_URL/IP_URL_TXT/IP_URL_CSV`;
+	let proxyIPRemark = `PROXYIP: ${proxyIP}`;
+
+	if (socks5Enable) {
+		proxyIPRemark = `socks5: ${parsedSocks5.hostname}:${parsedSocks5.port}`;
+	}
+
+	let remark = `您的订阅节点由设置变量 ${subRemark} 提供, 当前使用反代是${proxyIPRemark}`;
+
+	if (!proxyIP && !socks5Enable) {
+		remark = `您的订阅节点由设置变量 ${subRemark} 提供, 当前没设置反代, 推荐您设置PROXYIP变量或SOCKS5变量或订阅连接带proxyIP`;
+	}
+
+	return getConfigHtml(userID, host, remark, v2ray, clash);
+}
+
+function getFakeHostName(host) {
+	if (host.includes(".pages.dev")) {
+		return `${fakeHostName}.pages.dev`;
+	} else if (host.includes(".workers.dev") || host.includes("notls") || noTLS === 'true') {
+		return `${fakeHostName}.workers.dev`;
+	}
+	return `${fakeHostName}.xyz`;
+}
+
+async function getIpUrlTxtAndCsv(noTLS, urlTxts, urlCsvs) {
+	if (noTLS === 'true') {
+		return {
+			txt: await getIpUrlTxt(urlTxts),
+			csv: await getIpUrlCsv(urlCsvs, 'FALSE')
+		};
+	}
+	return {
+		txt: await getIpUrlTxt(urlTxts),
+		csv: await getIpUrlCsv(urlCsvs, 'TRUE')
+	};
+}
+
+async function getIpUrlTxt(urlTxts) {
+	if (!urlTxts || urlTxts.length === 0) {
+		return [];
+	}
+
+	let ipTxt = "";
+	const controller = new AbortController();
+	const timeout = setTimeout(() => {
+		controller.abort();
+	}, 2000);
+
+	try {
+		const urlMappings = urlTxts.map(entry => {
+			const [url, suffix] = entry.split('@');
+			return { url, suffix: suffix ? `@${suffix}` : '' };
+		});
+
+		const responses = await Promise.allSettled(
+			urlMappings.map(({ url }) =>
+				fetch(url, {
+					method: 'GET',
+					headers: {
+						'Accept': 'text/html,application/xhtml+xml,application/xml;',
+						'User-Agent': projectName
+					},
+					signal: controller.signal
+				}).then(response => response.ok ? response.text() : Promise.reject())
+			)
+		);
+
+		for (let i = 0; i < responses.length; i++) {
+			const response = responses[i];
+			if (response.status === 'fulfilled') {
+				const suffix = urlMappings[i].suffix;
+				const content = response.value
+					.split('\n')
+					.filter(line => line.trim() !== "")
+					.map(line => line + suffix)
+					.join('\n');
+
+				ipTxt += content + '\n';
+			}
+		}
+	} catch (error) {
+		console.error(error);
+	} finally {
+		clearTimeout(timeout);
+	}
+	// console.log(`ipTxt: ${ipTxt} \n `);
+	const newIpTxt = await addIpText(ipTxt);
+	return newIpTxt;
+}
+
+async function getIpUrlTxtToArry(urlTxts) {
+	if (!urlTxts || urlTxts.length === 0) {
+		return [];
+	}
+
+	let ipTxt = "";
+
+	// Create an AbortController object to control the cancellation of fetch requests
+	const controller = new AbortController();
+
+	// Set a timeout to trigger the cancellation of all requests after 2 seconds
+	const timeout = setTimeout(() => {
+		controller.abort(); // Cancel all requests
+	}, 2000);
+
+	try {
+		// Use Promise.allSettled to wait for all API requests to complete, regardless of success or failure
+		// Iterate over the api array and send a fetch request to each API URL
+		const responses = await Promise.allSettled(urlTxts.map(apiUrl => fetch(apiUrl, {
+			method: 'GET',
+			headers: {
+				'Accept': 'text/html,application/xhtml+xml,application/xml;',
+				'User-Agent': projectName
+			},
+			signal: controller.signal // Attach the AbortController's signal to the fetch request to allow cancellation when needed
+		}).then(response => response.ok ? response.text() : Promise.reject())));
+
+		// Iterate through all the responses
+		for (const response of responses) {
+			// Check if the request was fulfilled successfully
+			if (response.status === 'fulfilled') {
+				// Get the response content
+				const content = await response.value;
+				ipTxt += content + '\n';
+			}
+		}
+	} catch (error) {
+		console.error(error);
+	} finally {
+		// Clear the timeout regardless of success or failure
+		clearTimeout(timeout);
+	}
+
+	// Process the result using addIpText function
+	const newIpTxt = await addIpText(ipTxt);
+	// console.log(`ipUrlTxts: ${ipUrlTxts} \n ipTxt: ${ipTxt} \n newIpTxt: ${newIpTxt} `);
+
+	// Return the processed result
+	return newIpTxt;
+}
+
+async function getIpUrlCsv(urlCsvs, tls) {
+	// Check if the CSV URLs are valid
+	if (!urlCsvs || urlCsvs.length === 0) {
+		return [];
+	}
+
+	const newAddressesCsv = [];
+
+	// Fetch and process all CSVs concurrently
+	const fetchCsvPromises = urlCsvs.map(async (csvUrl) => {
+		// Parse the URL to get the suffix (after @)
+		const [url, suffix] = csvUrl.split('@');
+		const suffixText = suffix ? `@${suffix}` : '';  // If no @, suffixText will be an empty string
+
+		try {
+			const response = await fetch(url);
+
+
+			// Ensure the response is successful
+			if (!response.ok) {
+				console.error('Error fetching CSV:', response.status, response.statusText);
+				return;
+			}
+
+			// Parse the CSV content and split it into lines
+			const text = await response.text();
+			const lines = text.includes('\r\n') ? text.split('\r\n') : text.split('\n');
+
+			// Ensure we have a non-empty CSV
+			if (lines.length < 2) {
+				console.error('CSV file is empty or has no data rows');
+				return;
+			}
+
+			// Extract the header and get required field indexes
+			const header = lines[0].trim().split(',');
+			const tlsIndex = header.indexOf('TLS');
+			const ipAddressIndex = 0; // Assuming the first column is IP address
+			const portIndex = 1; // Assuming the second column is port
+			const dataCenterIndex = tlsIndex + 1; // Data center assumed to be right after TLS
+			const speedIndex = header.length - 1; // Last column for speed
+
+			// If the required fields are missing, skip this CSV
+			if (tlsIndex === -1) {
+				console.error('CSV file missing required TLS field');
+				return;
+			}
+
+			// Process the data rows
+			for (let i = 1; i < lines.length; i++) {
+				const columns = lines[i].trim().split(',');
+				// Skip empty or malformed rows
+				if (columns.length < header.length) {
+					continue;
+				}
+				// Check if TLS matches and speed is greater than sl
+				const tlsValue = columns[tlsIndex].toUpperCase();
+				const speedValue = parseFloat(columns[speedIndex]);
+				if (tlsValue === tls && speedValue > sl) {
+					const ipAddress = columns[ipAddressIndex];
+					const port = columns[portIndex];
+					const dataCenter = columns[dataCenterIndex];
+					// Add suffix to the result
+					newAddressesCsv.push(`${ipAddress}:${port}#${dataCenter}${suffixText}`);
+				}
+			}
+		} catch (error) {
+			console.error('Error processing CSV URL:', csvUrl, error);
+		}
+	});
+
+	// Wait for all CSVs to be processed
+	await Promise.all(fetchCsvPromises);
+
+	// console.log(`newAddressesCsv: ${newAddressesCsv} \n `);
+	return newAddressesCsv;
+}
+
+const protocolTypeBase64 = 'dmxlc3M=';
+/**
+ * Get node configuration information
+ * @param {*} uuid 
+ * @param {*} host 
+ * @param {*} address 
+ * @param {*} port 
+ * @param {*} remarks 
+ * @returns 
+ */
+function getConfigLink(uuid, host, address, port, remarks, proxyip) {
+	const protocolType = atob(protocolTypeBase64);
+
+	const encryption = 'none';
+	let path = '/?ed=2560';
+	if (proxyip) {
+		path = `/?ed=2560&PROXYIP=${proxyip}`;
+	}
+	const fingerprint = 'randomized';
+	let tls = ['tls', true];
+	if (host.includes('.workers.dev') || host.includes('pages.dev')) {
+		path = `/${host}${path}`;
+		remarks += ' 请通过绑定自定义域名订阅！';
+	}
+
+	const v2ray = getV2rayLink({ protocolType, host, uuid, address, port, remarks, encryption, path, fingerprint, tls });
+	const clash = getClashLink(protocolType, host, address, port, uuid, path, tls, fingerprint);
+
+	return [v2ray, clash];
+}
+
+/**
+ * Get channel information
+ * @param {*} param0 
+ * @returns 
+ */
+function getV2rayLink({ protocolType, host, uuid, address, port, remarks, encryption, path, fingerprint, tls }) {
+	let sniAndFp = `&sni=${host}&fp=${fingerprint}`;
+	if (portSet_http.has(parseInt(port))) {
+		tls = ['', false];
+		sniAndFp = '';
+	}
+
+	const v2rayLink = `${protocolType}://${uuid}@${address}:${port}?encryption=${encryption}&security=${tls[0]}&type=${network}&host=${host}&path=${encodeURIComponent(path)}${sniAndFp}#${encodeURIComponent(remarks)}`;
+	return v2rayLink;
+}
+
+/**
+ * getClashLink
+ * @param {*} protocolType 
+ * @param {*} host 
+ * @param {*} address 
+ * @param {*} port 
+ * @param {*} uuid 
+ * @param {*} path 
+ * @param {*} tls 
+ * @param {*} fingerprint 
+ * @returns 
+ */
+function getClashLink(protocolType, host, address, port, uuid, path, tls, fingerprint) {
+	return `- {type: ${protocolType}, name: ${host}, server: ${address}, port: ${port}, password: ${uuid}, network: ${network}, tls: ${tls[1]}, udp: false, sni: ${host}, client-fingerprint: ${fingerprint}, skip-cert-verify: true,  ws-opts: {path: ${path}, headers: {Host: ${host}}}}`;
+
+	// 	return `
+	//   - type: ${protocolType}
+	//     name: ${host}
+	//     server: ${address}
+	//     port: ${port}
+	//     uuid: ${uuid}
+	//     network: ${network}
+	//     tls: ${tls[1]}
+	//     udp: false
+	//     sni: ${host}
+	//     client-fingerprint: ${fingerprint}
+	//     ws-opts:
+	//       path: "${path}"
+	//       headers:
+	//         host: ${host}
+	// 	`;
+}
+
+/**
+ * Generate home page
+ * @param {*} userID 
+ * @param {*} hostName 
+ * @param {*} remark 
+ * @param {*} v2ray 
+ * @param {*} clash 
+ * @returns 
+ */
+function getConfigHtml(userID, host, remark, v2ray, clash) {
+	// HTML Head with CSS and FontAwesome library
+	const htmlHead = `
+    <head>
+      <title>${projectName}(${fileName})</title>
+      <meta name='description' content='This is a project to generate free vmess nodes. For more information, please subscribe youtube(AM科技) https://youtube.com/@am_clubs and follow GitHub https://github.com/amclubs ' />
+      <style>
+        body {
+          font-family: Arial, sans-serif;
+          background-color: #f0f0f0;
+          color: #333;
+          padding: 0;
+          margin: 0;
+        }
+        a {
+          color: #1a0dab;
+          text-decoration: none;
+        }
+        img {
+          max-width: 100%;
+          height: auto;
+        }
+        pre {
+          white-space: pre-wrap;
+          word-wrap: break-word;
+          background-color: #fff;
+          border: 1px solid #ddd;
+          padding: 10px;
+          margin: 0;
+        }
+        /* Dark mode */
+        @media (prefers-color-scheme: dark) {
+          body {
+            background-color: #333;
+            color: #f0f0f0;
+          }
+          a {
+            color: #9db4ff;
+          }
+          pre {
+            background-color: #282a36;
+            border-color: #6272a4;
+          }
+        }
+      </style>
+    </head>
+  `;
+
+	// Prepare header string with left alignment
+	const header = `
+		<p align="left" style="padding-left: 20px; margin-top: 20px;">
+		Telegram交流群 点击加入，技术大佬~在线交流</br>
+		<a href="https://t.me/am_clubs" target="_blank">https://t.me/am_clubs</a>
+		</br></br>
+		GitHub项目地址 点击进入，点下星星给个Star!Star!Star!</br>
+		<a href="https://github.com/${projectName}" target="_blank">https://github.com/${projectName}</a>
+		</br></br>
+		YouTube频道 点击订阅频道，观看更多技术教程</br>
+		<a href="${ytName}?sub_confirmation=1" target="_blank">${ytName}</a>
+		</p>
+  `;
+
+	// Prepare the output string
+	const httpAddr = `https://${host}/${userID}`;
+	const output = `
+################################################################
+订阅地址, 支持 Base64、clash-meta、sing-box、Quantumult X、小火箭、surge 等订阅格式, ${remark}
+---------------------------------------------------------------
+通用订阅地址: <button onclick='copyToClipboard("${httpAddr}?sub")'><i class="fa fa-clipboard"></i> 点击复制订阅地址 </button>
+${httpAddr}?sub
+
+Base64订阅地址: <button onclick='copyToClipboard("${httpAddr}?base64")'><i class="fa fa-clipboard"></i> 点击复制订阅地址 </button>
+${httpAddr}?base64
+
+clash订阅地址: <button onclick='copyToClipboard("${httpAddr}?clash")'><i class="fa fa-clipboard"></i> 点击复制订阅地址 </button>
+${httpAddr}?clash
+
+singbox订阅地址: <button onclick='copyToClipboard("${httpAddr}?singbox")'><i class="fa fa-clipboard"></i> 点击复制订阅地址 </button>
+${httpAddr}?singbox
+---------------------------------------------------------------
+################################################################
+v2ray
+---------------------------------------------------------------
+${v2ray}
+---------------------------------------------------------------
+################################################################
+clash-meta
+---------------------------------------------------------------
+${clash}
+---------------------------------------------------------------
+################################################################
+  `;
+
+	// Final HTML
+	const html = `
+<html>
+${htmlHead}
+<body>
+  ${header}
+  <pre>${output}</pre>
+  <script>
+    function copyToClipboard(text) {
+      navigator.clipboard.writeText(text)
+        .then(() => {
+          alert("Copied to clipboard");
+        })
+        .catch(err => {
+          console.error("Failed to copy to clipboard:", err);
+        });
+    }
+  </script>
+</body>
+</html>
+  `;
+
+	return html;
+}
+
+
+let portSet_http = new Set([80, 8080, 8880, 2052, 2086, 2095, 2082]);
+let portSet_https = new Set([443, 8443, 2053, 2096, 2087, 2083]);
+/**
+ * 
+ * @param {*} host 
+ * @param {*} uuid 
+ * @param {*} noTLS 
+ * @param {*} ipUrlTxt 
+ * @param {*} ipUrlCsv 
+ * @returns 
+ */
+async function getSubscribeNode(userAgent, _url, host, fakeHostName, fakeUserID, noTLS, ipUrlTxt, ipUrlCsv) {
+	// Use Set object to remove duplicates
+	const uniqueIpTxt = [...new Set([...ipLocal, ...ipUrlTxt, ...ipUrlCsv])];
+	let responseBody = splitNodeData(uniqueIpTxt, noTLS, fakeHostName, fakeUserID, userAgent);
+	// console.log(`getSubscribeNode---> responseBody: ${responseBody} `);
+
+	if (!userAgent.includes(('CF-FAKE-UA').toLowerCase())) {
+
+		let url = `https://${host}/${fakeUserID}`;
+
+		if (isClashCondition(userAgent, _url)) {
+			isBase64 = false;
+			url = createSubConverterUrl('clash', url, subConfig, subConverter, subProtocol);
+		} else if (isSingboxCondition(userAgent, _url)) {
+			isBase64 = false;
+			url = createSubConverterUrl('singbox', url, subConfig, subConverter, subProtocol);
+		} else {
+			return responseBody;
+		}
+		const response = await fetch(url, {
+			headers: {
+				//'Content-Type': 'text/html; charset=UTF-8',
+				'User-Agent': `${userAgent} ${projectName}`
+			}
+		});
+		responseBody = await response.text();
+		//console.log(`getSubscribeNode---> url: ${url} `);
+	}
+
+	return responseBody;
+}
+
+function createSubConverterUrl(target, url, subConfig, subConverter, subProtocol) {
+	return `${subProtocol}://${subConverter}/sub?target=${target}&url=${encodeURIComponent(url)}&insert=false&config=${encodeURIComponent(subConfig)}&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
+}
+
+function isClashCondition(userAgent, _url) {
+	return (userAgent.includes('clash') && !userAgent.includes('nekobox')) || (_url.searchParams.has('clash') && !userAgent.includes('subConverter'));
+}
+
+function isSingboxCondition(userAgent, _url) {
+	return userAgent.includes('sing-box') || userAgent.includes('singbox') || ((_url.searchParams.has('singbox') || _url.searchParams.has('sb')) && !userAgent.includes('subConverter'));
+}
+
+/**
+ * 
+ * @param {*} uniqueIpTxt 
+ * @param {*} noTLS 
+ * @param {*} host 
+ * @param {*} uuid 
+ * @returns 
+ */
+function splitNodeData(uniqueIpTxt, noTLS, host, uuid, userAgent) {
+	// Regex to match IPv4 and IPv6
+	// const regex = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|\[.*\]):?(\d+)?#?(.*)?$/;
+	const regex = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|\[.*\]):?(\d+)?#?([^@#]*)@?(.*)?$/;
+
+	// Region codes mapped to corresponding emojis
+	const regionMap = {
+		'SG': '🇸🇬 SG',
+		'HK': '🇭🇰 HK',
+		'KR': '🇰🇷 KR',
+		'JP': '🇯🇵 JP',
+		'GB': '🇬🇧 GB',
+		'US': '🇺🇸 US',
+		'TW': '🇼🇸 TW',
+		'CF': '📶 CF'
+	};
+
+	const responseBody = uniqueIpTxt.map(ipTxt => {
+		// console.log(`splitNodeData---> ipTxt: ${ipTxt} `);
+		let address = ipTxt;
+		let port = "443";
+		let remarks = "";
+		let proxyip = "";
+
+		const match = address.match(regex);
+		if (match && !ipTxt.includes('@am_clubs')) {
+			address = match[1];
+			port = match[2] || port;
+			remarks = match[3] || host;
+			proxyip = match[4] || '';
+			// console.log(`splitNodeData--match-> \n address: ${address} \n port: ${port} \n remarks: ${remarks} \n proxyip: ${proxyip}`);
+		} else {
+			let ip, newPort, extra;
+
+			if (ipTxt.includes('@') && !ipTxt.includes('@am_clubs')) {
+				const [addressPart, proxyipPart] = ipTxt.split('@');
+				ipTxt = addressPart;
+				proxyip = proxyipPart;
+				// console.log(`splitNodeData-ipTxt.includes('@')--> ipTxt: ${ipTxt} \n proxyip: ${proxyip} `);
+			}
+			if (ipTxt.includes(':') && ipTxt.includes('#')) {
+				[ip, newPort, extra] = ipTxt.split(/[:#]/);
+			} else if (ipTxt.includes(':')) {
+				[ip, newPort] = ipTxt.split(':');
+			} else if (ipTxt.includes('#')) {
+				[ip, extra] = ipTxt.split('#');
+			} else {
+				ip = ipTxt;
+			}
+
+			address = ip;
+			port = newPort || port;
+			remarks = extra || host;
+			// console.log(`splitNodeData---> \n address: ${address} \n port: ${port} \n remarks: ${remarks} \n proxyip: ${proxyip}`);
+		}
+
+		// Replace region code with corresponding emoji
+		remarks = regionMap[remarks] || remarks;
+
+		// Check if TLS is disabled and if the port is in the allowed set
+		if (noTLS !== 'true' && portSet_http.has(parseInt(port))) {
+			return null; // Skip this iteration
+		}
+
+		const [v2ray, clash] = getConfigLink(uuid, host, address, port, remarks, proxyip);
+		return v2ray;
+	}).filter(Boolean).join('\n');
+
+	let base64Response = responseBody;
+	return btoa(base64Response);
+}
+
+/** ---------------------Get CF data------------------------------ */
+
+async function getCFConfig(email, key, accountIndex) {
+	try {
+		const now = new Date();
+		const today = new Date(now);
+		today.setHours(0, 0, 0, 0);
+
+		// Calculate default value
+		const ud = Math.floor(((now - today.getTime()) / 86400000) * 24 * 1099511627776 / 2);
+		let upload = ud;
+		let download = ud;
+		let total = 24 * 1099511627776;
+
+		if (email && key) {
+			const accountId = await getAccountId(email, key);
+			if (accountId) {
+				// Calculate start and end time
+				now.setUTCHours(0, 0, 0, 0);
+				const startDate = now.toISOString();
+				const endDate = new Date().toISOString();
+
+				// Get summary data
+				const [pagesSumResult, workersSumResult] = await getCFSum(accountId, accountIndex, email, key, startDate, endDate);
+				upload = pagesSumResult;
+				download = workersSumResult;
+				total = 102400;
+			}
+		}
+
+		return { upload, download, total };
+	} catch (error) {
+		console.error('Error in getCFConfig:', error);
+		return { upload: 0, download: 0, total: 0 };
+	}
+}
+
+/**
+ * 
+ * @param {*} email 
+ * @param {*} key 
+ * @returns 
+ */
+async function getAccountId(email, key) {
+	try {
+		const url = 'https://api.cloudflare.com/client/v4/accounts';
+		const headers = {
+			'X-AUTH-EMAIL': email,
+			'X-AUTH-KEY': key
+		};
+
+		const response = await fetch(url, { headers });
+
+		if (!response.ok) {
+			throw new Error(`HTTP error! status: ${response.status}`);
+		}
+
+		const data = await response.json();
+		//console.error('getAccountId-->', data);
+
+		return data?.result?.[0]?.id || false;
+	} catch (error) {
+		console.error('Error fetching account ID:', error);
+		return false;
+	}
+}
+
+/**
+ * 
+ * @param {*} accountId 
+ * @param {*} accountIndex 
+ * @param {*} email 
+ * @param {*} key 
+ * @param {*} startDate 
+ * @param {*} endDate 
+ * @returns 
+ */
+async function getCFSum(accountId, accountIndex, email, key, startDate, endDate) {
+	try {
+		const [startDateISO, endDateISO] = [new Date(startDate), new Date(endDate)].map(d => d.toISOString());
+
+		const query = JSON.stringify({
+			query: `query getBillingMetrics($accountId: String!, $filter: AccountWorkersInvocationsAdaptiveFilter_InputObject) {
+				viewer {
+					accounts(filter: {accountTag: $accountId}) {
+						pagesFunctionsInvocationsAdaptiveGroups(limit: 1000, filter: $filter) {
+							sum {
+								requests
+							}
+						}
+						workersInvocationsAdaptive(limit: 10000, filter: $filter) {
+							sum {
+								requests
+							}
+						}
+					}
+				}
+			}`,
+			variables: {
+				accountId,
+				filter: { datetime_geq: startDateISO, datetime_leq: endDateISO }
+			},
+		});
+
+		const headers = {
+			'Content-Type': 'application/json',
+			'X-AUTH-EMAIL': email,
+			'X-AUTH-KEY': key
+		};
+
+		const response = await fetch('https://api.cloudflare.com/client/v4/graphql', {
+			method: 'POST',
+			headers,
+			body: query
+		});
+
+		if (!response.ok) {
+			throw new Error(`HTTP error! status: ${response.status}`);
+		}
+
+		const res = await response.json();
+		const accounts = res?.data?.viewer?.accounts?.[accountIndex];
+
+		if (!accounts) {
+			throw new Error('找不到账户数据');
+		}
+
+		const getSumRequests = (data) => data?.reduce((total, item) => total + (item?.sum?.requests || 0), 0) || 0;
+
+		const pagesSum = getSumRequests(accounts.pagesFunctionsInvocationsAdaptiveGroups);
+		const workersSum = getSumRequests(accounts.workersInvocationsAdaptive);
+
+		return [pagesSum, workersSum];
+
+	} catch (error) {
+		console.error('Error fetching billing metrics:', error);
+		return [0, 0];
+	}
+}
+
+// const MY_KV_NAMESPACE = atob('YW1jbHVicw==');
+const MY_KV_UUID_KEY = atob('VVVJRA==');;
+
+async function checkKVNamespaceBinding(env) {
+	if (typeof env.amclubs === 'undefined') {
+		return new Response('Error: amclubs KV_NAMESPACE is not bound.', {
+			status: 400,
+		})
+	}
+}
+
+async function getKVData(env) {
+	const value = await env.amclubs.get(MY_KV_UUID_KEY);
+	return value ? String(value) : '';
+	// return new Response(value || 'Key not found', {
+	// 	status: value ? 200 : 404
+	// });
+}
+
+async function setKVData(request, env) {
+	if (request.method !== 'POST') {
+		return new Response('Use POST method to set values', { status: 405 });
+	}
+
+	const value = await request.text();
+	// console.log(`setKVData----> Received value: ${value} \n`);
+
+	try {
+		await env.amclubs.put(MY_KV_UUID_KEY, value);
+
+		// 读取存入的值，确认是否成功
+		const storedValue = await env.amclubs.get(MY_KV_UUID_KEY);
+		if (storedValue === value) {
+			return new Response(`${MY_KV_UUID_KEY} updated successfully`, { status: 200 });
+		} else {
+			return new Response(`Error: Value verification failed after storage`, { status: 500 });
+		}
+	} catch (error) {
+		return new Response(`Error storing value: ${error.message}`, { status: 500 });
+	}
+}
+
+async function showKVPage(env) {
+	const kvCheckResponse = await checkKVNamespaceBinding(env);
+	if (kvCheckResponse) {
+		return kvCheckResponse;
+	}
+	const value = await getKVData(env);
+	return new Response(
+		`<!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8"> 
+        <title>${fileName}</title>
+        <style>
+          html, body {
+            height: 100%;
+            margin: 0;
+            display: flex;
+            justify-content: center; 
+            align-items: center; 
+            font-family: Arial, sans-serif;
+          }
+
+          .container {
+            text-align: center; 
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            background-color: #f9f9f9;
+            width: 400px;
+          }
+
+          h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+          }
+
+          textarea {
+            width: 100%;
+            height: 100px;
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            resize: none;
+          }
+
+          button {
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 10px;
+          }
+
+          button:hover {
+            background-color: #45a049;
+          }
+
+          #saveStatus {
+            color: green;
+            margin-top: 10px;
+          }
+        </style>
+        <script>
+          async function fetchData() {
+            const response = await fetch('/${userID}/get');
+            const text = await response.text();
+            document.getElementById('value').value = text;
+          }
+
+          async function saveData() {
+            const value = document.getElementById('value').value;
+            const response = await fetch('/${userID}/set', { method: 'POST', body: value });
+            const responseText = await response.text();
+
+            document.getElementById('saveStatus').innerText = responseText;
+          }
+        </script>
+      </head>
+      <body>
+        <div class="container">
+          <h1>UUID 页面</h1>
+          <label for="key">Key:</label>
+          <input type="text" id="key" value="${MY_KV_UUID_KEY}" readonly />
+          <br/><br/>
+          <label for="value">Value:</label>
+          <textarea id="value">${value || ''}</textarea>
+          <br/><br/>
+          <button onclick="saveData()">Save</button>
+          <div id="saveStatus"></div>
+        </div>
+      </body>
+    </html>`,
+		{
+			headers: { 'Content-Type': 'text/html; charset=UTF-8' },
+			status: 200,
+		}
+	);
+}
+
+
+const API_URL = 'http://ip-api.com/json/';
+const TELEGRAM_API_URL = 'https://api.telegram.org/bot';
+/**
+ * Send message to Telegram channel
+ * @param {string} type 
+ * @param {string} ip I
+ * @param {string} [add_data=""] 
+ */
+async function sendMessage(type, ip, add_data = "") {
+	if (botToken && chatID) {
+		try {
+			const ipResponse = await fetch(`${API_URL}${ip}?lang=zh-CN`);
+			let msg = `${type}\nIP: ${ip}\n${add_data}`;
+
+			if (ipResponse.ok) {
+				const ipInfo = await ipResponse.json();
+				msg = `${type}\nIP: ${ip}\n国家: ${ipInfo.country}\n城市: ${ipInfo.city}\n组织: ${ipInfo.org}\nASN: ${ipInfo.as}\n${add_data}`;
+			} else {
+				console.error(`Failed to fetch IP info. Status: ${ipResponse.status}`);
+			}
+
+			const telegramUrl = `${TELEGRAM_API_URL}${botToken}/sendMessage`;
+			const params = new URLSearchParams({
+				chat_id: chatID,
+				parse_mode: 'HTML',
+				text: msg
+			});
+
+			await fetch(`${telegramUrl}?${params.toString()}`, {
+				method: 'GET',
+				headers: {
+					'Accept': 'text/html,application/xhtml+xml,application/xml',
+					'Accept-Encoding': 'gzip, deflate, br',
+					'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.72 Safari/537.36'
+				}
+			});
+
+		} catch (error) {
+			console.error('Error sending message:', error);
+		}
+	} else {
+		console.warn('botToken or chatID is missing.');
+	}
+}
+
+
+/** -------------------processing logic-------------------------------- */
+/**
+ * Handles channel over WebSocket requests by creating a WebSocket pair, accepting the WebSocket connection, and processing the channel header.
+ * @param {import("@cloudflare/workers-types").Request} request The incoming request object.
+ * @returns {Promise<Response>} A Promise that resolves to a WebSocket response object.
+ */
+async function channelOverWSHandler(request) {
 	const webSocketPair = new WebSocketPair();
 	const [client, webSocket] = Object.values(webSocketPair);
-
 	webSocket.accept();
 
 	let address = '';
 	let portWithRandomLog = '';
+	let currentDate = new Date();
 	const log = (/** @type {string} */ info, /** @type {string | undefined} */ event) => {
-		console.log(`[${address}:${portWithRandomLog}] ${info}`, event || '');
+		console.log(`[${currentDate} ${address}:${portWithRandomLog}] ${info}`, event || '');
 	};
 	const earlyDataHeader = request.headers.get('sec-websocket-protocol') || '';
-
-	const readableWebSocketStream = MakeReadableWebSocketStream(webSocket, earlyDataHeader, log);
+	const readableWebSocketStream = makeReadableWebSocketStream(webSocket, earlyDataHeader, log);
 
 	/** @type {{ value: import("@cloudflare/workers-types").Socket | null}}*/
 	let remoteSocketWapper = {
 		value: null,
 	};
+	let udpStreamWrite = null;
 	let isDns = false;
 
 	// ws --> remote
 	readableWebSocketStream.pipeTo(new WritableStream({
 		async write(chunk, controller) {
-			if (isDns) {
-				return await handleDNSQuery(chunk, webSocket, null, log);
+			if (isDns && udpStreamWrite) {
+				return udpStreamWrite(chunk);
 			}
 			if (remoteSocketWapper.value) {
 				const writer = remoteSocketWapper.value.writable.getWriter()
@@ -436,38 +1462,42 @@ async function ProtocolOverWSHandler(request) {
 
 			const {
 				hasError,
-				message,
-				addressType,
+				//message,
 				portRemote = 443,
 				addressRemote = '',
 				rawDataIndex,
-				ProtocolVersion = new Uint8Array([0, 0]),
+				channelVersion = new Uint8Array([0, 0]),
 				isUDP,
-			} = ProcessProtocolHeader(chunk, userID);
+				addressType,
+			} = processchannelHeader(chunk, userID);
 			address = addressRemote;
-			portWithRandomLog = `${portRemote}--${Math.random()} ${isUDP ? 'udp ' : 'tcp '
-				} `;
+			portWithRandomLog = `${portRemote} ${isUDP ? 'udp' : 'tcp'} `;
+
 			if (hasError) {
-				// controller.error(message);
-				throw new Error(message); // cf seems has bug, controller.error will not end stream
+				throw new Error(message);
 			}
-			// Handle UDP connections for DNS (port 53) only
-			if (isUDP) {
-				if (portRemote === 53) {
-					isDns = true;
-				} else {
-					throw new Error('UDP proxy is only enabled for DNS (port 53)');
-				}
-				return; // Early return after setting isDns or throwing error
+
+			// If UDP and not DNS port, close it
+			if (isUDP && portRemote !== 53) {
+				throw new Error('UDP proxy only enabled for DNS which is port 53');
 			}
-			// ["version", "附加信息长度 N"]
-			const ProtocolResponseHeader = new Uint8Array([ProtocolVersion[0], 0]);
+
+			if (isUDP && portRemote === 53) {
+				isDns = true;
+			}
+
+			const channelResponseHeader = new Uint8Array([channelVersion[0], 0]);
 			const rawClientData = chunk.slice(rawDataIndex);
 
 			if (isDns) {
-				return handleDNSQuery(rawClientData, webSocket, ProtocolResponseHeader, log);
+				const { write } = await handleUDPOutBound(webSocket, channelResponseHeader, log);
+				udpStreamWrite = write;
+				udpStreamWrite(rawClientData);
+				return;
 			}
-			HandleTCPOutBound(remoteSocketWapper, addressType, addressRemote, portRemote, rawClientData, webSocket, ProtocolResponseHeader, log);
+			log(`processchannelHeader-->${addressType} Processing TCP outbound connection ${addressRemote}:${portRemote}`);
+
+			handleTCPOutBound(remoteSocketWapper, addressRemote, portRemote, rawClientData, webSocket, channelResponseHeader, log, addressType);
 		},
 		close() {
 			log(`readableWebSocketStream is close`);
@@ -481,76 +1511,76 @@ async function ProtocolOverWSHandler(request) {
 
 	return new Response(null, {
 		status: 101,
-		// @ts-ignore
 		webSocket: client,
 	});
 }
 
 /**
- * Handles outbound TCP connections for the proxy.
- * Establishes connection to remote server and manages data flow.
- * @param {Socket} remoteSocket - Remote socket connection
- * @param {string} addressType - Type of address (IPv4/IPv6)
- * @param {string} addressRemote - Remote server address
- * @param {number} portRemote - Remote server port
- * @param {Uint8Array} rawClientData - Raw data from client
- * @param {WebSocket} webSocket - WebSocket connection
- * @param {Uint8Array} protocolResponseHeader - Protocol response header
- * @param {Function} log - Logging function
+ * Handles outbound TCP connections.
+ *
+ * @param {any} remoteSocket
+ * @param {string} addressRemote The remote address to connect to.
+ * @param {number} portRemote The remote port to connect to.
+ * @param {Uint8Array} rawClientData The raw client data to write.
+ * @param {import("@cloudflare/workers-types").WebSocket} webSocket The WebSocket to pass the remote socket to.
+ * @param {Uint8Array} channelResponseHeader The channel response header.
+ * @param {function} log The logging function.
+ * @returns {Promise<void>} The remote socket.
  */
-async function HandleTCPOutBound(remoteSocket, addressType, addressRemote, portRemote, rawClientData, webSocket, protocolResponseHeader, log,) {
+async function handleTCPOutBound(remoteSocket, addressRemote, portRemote, rawClientData, webSocket, channelResponseHeader, log, addressType,) {
+
+	/**
+	 * Connects to a given address and port and writes data to the socket.
+	 * @param {string} address The address to connect to.
+	 * @param {number} port The port to connect to.
+	 * @returns {Promise<import("@cloudflare/workers-types").Socket>} A Promise that resolves to the connected socket.
+	 */
 	async function connectAndWrite(address, port, socks = false) {
 		/** @type {import("@cloudflare/workers-types").Socket} */
-		let tcpSocket;
-		if (socks5Relay) {
-			tcpSocket = await socks5Connect(addressType, address, port, log)
-		} else {
-			tcpSocket = socks ? await socks5Connect(addressType, address, port, log)
-				: connect({
-					hostname: address,
-					port: port,
-				});
-		}
+		const tcpSocket = socks ? await socks5Connect(addressType, address, port, log)
+			: connect({
+				hostname: address,
+				port: port,
+			});
 		remoteSocket.value = tcpSocket;
-		log(`connected to ${address}:${port}`);
+		console.log(`connectAndWrite-${socks} connected to ${address}:${port}`);
 		const writer = tcpSocket.writable.getWriter();
-		await writer.write(rawClientData); // first write, normal is tls client hello
+		await writer.write(rawClientData);
 		writer.releaseLock();
 		return tcpSocket;
 	}
 
-	// if the cf connect tcp socket have no incoming data, we retry to redirect ip
+	/**
+	 * Retries connecting to the remote address and port if the Cloudflare socket has no incoming data.
+	 * @returns {Promise<void>} A Promise that resolves when the retry is complete.
+	 */
 	async function retry() {
-		if (enableSocks) {
-			tcpSocket = await connectAndWrite(addressRemote, portRemote, true);
-		} else {
-			tcpSocket = await connectAndWrite(proxyIP || addressRemote, proxyPort || portRemote, false);
-		}
-		// no matter retry success or not, close websocket
+		const tcpSocket = socks5Enable ? await connectAndWrite(addressRemote, portRemote, true) : await connectAndWrite(proxyIP || addressRemote, proxyPort || portRemote);
+
+		console.log(`retry-${socks5Enable} connected to ${addressRemote}:${portRemote}`);
 		tcpSocket.closed.catch(error => {
 			console.log('retry tcpSocket closed error', error);
 		}).finally(() => {
 			safeCloseWebSocket(webSocket);
 		})
-		RemoteSocketToWS(tcpSocket, webSocket, protocolResponseHeader, null, log);
+		remoteSocketToWS(tcpSocket, webSocket, channelResponseHeader, null, log);
 	}
 
-	let tcpSocket = await connectAndWrite(addressRemote, portRemote);
+	const tcpSocket = await connectAndWrite(addressRemote, portRemote);
 
 	// when remoteSocket is ready, pass to websocket
 	// remote--> ws
-	RemoteSocketToWS(tcpSocket, webSocket, protocolResponseHeader, retry, log);
+	remoteSocketToWS(tcpSocket, webSocket, channelResponseHeader, retry, log);
 }
 
 /**
- * Creates a readable stream from WebSocket server.
- * Handles early data and WebSocket messages.
- * @param {WebSocket} webSocketServer - WebSocket server instance
- * @param {string} earlyDataHeader - Header for early data (0-RTT)
- * @param {Function} log - Logging function
- * @returns {ReadableStream} Stream of WebSocket data
+ * Creates a readable stream from a WebSocket server, allowing for data to be read from the WebSocket.
+ * @param {import("@cloudflare/workers-types").WebSocket} webSocketServer The WebSocket server to create the readable stream from.
+ * @param {string} earlyDataHeader The header containing early data for WebSocket 0-RTT.
+ * @param {(info: string)=> void} log The logging function.
+ * @returns {ReadableStream} A readable stream that can be used to read data from the WebSocket.
  */
-function MakeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
+function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
 	let readableStreamCancel = false;
 	const stream = new ReadableStream({
 		start(controller) {
@@ -576,7 +1606,7 @@ function MakeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
 			}
 		},
 
-		pull(_controller) {
+		pull(controller) {
 			// if ws can stop read if stream is full, we can implement backpressure
 			// https://streams.spec.whatwg.org/#example-rs-push-backpressure
 		},
@@ -591,171 +1621,221 @@ function MakeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
 	return stream;
 }
 
+// https://xtls.github.io/development/protocols/channel.html
+
 /**
- * Processes VLESS protocol header.
- * Extracts and validates protocol information from buffer.
- * @param {ArrayBuffer} protocolBuffer - Buffer containing protocol header
- * @param {string} userID - User ID for validation
- * @returns {Object} Processed header information
+ * Processes the channel header buffer and returns an object with the relevant information.
+ * @param {ArrayBuffer} channelBuffer The channel header buffer to process.
+ * @param {string} userID The user ID to validate against the UUID in the channel header.
+ * @returns {{
+ *  hasError: boolean,
+ *  message?: string,
+ *  addressRemote?: string,
+ *  addressType?: number,
+ *  portRemote?: number,
+ *  rawDataIndex?: number,
+ *  channelVersion?: Uint8Array,
+ *  isUDP?: boolean
+ * }} An object with the relevant information extracted from the channel header buffer.
  */
-function ProcessProtocolHeader(protocolBuffer, userID) {
-	if (protocolBuffer.byteLength < 24) {
-		return { hasError: true, message: 'invalid data' };
+function processchannelHeader(channelBuffer, userID) {
+	if (channelBuffer.byteLength < 24) {
+		return {
+			hasError: true,
+			message: 'invalid data',
+		};
 	}
 
-	const dataView = new DataView(protocolBuffer);
-	const version = dataView.getUint8(0);
-	const slicedBufferString = stringify(new Uint8Array(protocolBuffer.slice(1, 17)));
-
+	const version = new Uint8Array(channelBuffer.slice(0, 1));
+	let isValidUser = false;
+	let isUDP = false;
+	const slicedBuffer = new Uint8Array(channelBuffer.slice(1, 17));
+	const slicedBufferString = stringify(slicedBuffer);
+	// check if userID is valid uuid or uuids split by , and contains userID in it otherwise return error message to console
 	const uuids = userID.includes(',') ? userID.split(",") : [userID];
-	const isValidUser = uuids.some(uuid => slicedBufferString === uuid.trim()) ||
-		(uuids.length === 1 && slicedBufferString === uuids[0].trim());
+	// uuid_validator(hostName, slicedBufferString);
+
+
+	// isValidUser = uuids.some(userUuid => slicedBufferString === userUuid.trim());
+	isValidUser = uuids.some(userUuid => slicedBufferString === userUuid.trim()) || uuids.length === 1 && slicedBufferString === uuids[0].trim();
 
 	console.log(`userID: ${slicedBufferString}`);
 
 	if (!isValidUser) {
-		return { hasError: true, message: 'invalid user' };
+		return {
+			hasError: true,
+			message: 'invalid user',
+		};
 	}
 
-	const optLength = dataView.getUint8(17);
-	const command = dataView.getUint8(18 + optLength);
+	const optLength = new Uint8Array(channelBuffer.slice(17, 18))[0];
+	//skip opt for now
 
-	if (command !== 1 && command !== 2) {
-		return { hasError: true, message: `command ${command} is not supported, command 01-tcp,02-udp,03-mux` };
+	const command = new Uint8Array(
+		channelBuffer.slice(18 + optLength, 18 + optLength + 1)
+	)[0];
+
+	// 0x01 TCP
+	// 0x02 UDP
+	// 0x03 MUX
+	if (command === 1) {
+		isUDP = false;
+	} else if (command === 2) {
+		isUDP = true;
+	} else {
+		return {
+			hasError: true,
+			message: `command ${command} is not support, command 01-tcp,02-udp,03-mux`,
+		};
 	}
-
 	const portIndex = 18 + optLength + 1;
-	const portRemote = dataView.getUint16(portIndex);
-	const addressType = dataView.getUint8(portIndex + 2);
-	let addressValue, addressLength, addressValueIndex;
+	const portBuffer = channelBuffer.slice(portIndex, portIndex + 2);
+	// port is big-Endian in raw data etc 80 == 0x005d
+	const portRemote = new DataView(portBuffer).getUint16(0);
 
+	let addressIndex = portIndex + 2;
+	const addressBuffer = new Uint8Array(
+		channelBuffer.slice(addressIndex, addressIndex + 1)
+	);
+
+	// 1--> ipv4  addressLength =4
+	// 2--> domain name addressLength=addressBuffer[1]
+	// 3--> ipv6  addressLength =16
+	const addressType = addressBuffer[0];
+	let addressLength = 0;
+	let addressValueIndex = addressIndex + 1;
+	let addressValue = '';
 	switch (addressType) {
 		case 1:
 			addressLength = 4;
-			addressValueIndex = portIndex + 3;
-			addressValue = new Uint8Array(protocolBuffer.slice(addressValueIndex, addressValueIndex + addressLength)).join('.');
+			addressValue = new Uint8Array(
+				channelBuffer.slice(addressValueIndex, addressValueIndex + addressLength)
+			).join('.');
 			break;
 		case 2:
-			addressLength = dataView.getUint8(portIndex + 3);
-			addressValueIndex = portIndex + 4;
-			addressValue = new TextDecoder().decode(protocolBuffer.slice(addressValueIndex, addressValueIndex + addressLength));
+			addressLength = new Uint8Array(
+				channelBuffer.slice(addressValueIndex, addressValueIndex + 1)
+			)[0];
+			addressValueIndex += 1;
+			addressValue = new TextDecoder().decode(
+				channelBuffer.slice(addressValueIndex, addressValueIndex + addressLength)
+			);
 			break;
 		case 3:
 			addressLength = 16;
-			addressValueIndex = portIndex + 3;
-			addressValue = Array.from({ length: 8 }, (_, i) => dataView.getUint16(addressValueIndex + i * 2).toString(16)).join(':');
+			const dataView = new DataView(
+				channelBuffer.slice(addressValueIndex, addressValueIndex + addressLength)
+			);
+			// 2001:0db8:85a3:0000:0000:8a2e:0370:7334
+			const ipv6 = [];
+			for (let i = 0; i < 8; i++) {
+				ipv6.push(dataView.getUint16(i * 2).toString(16));
+			}
+			addressValue = ipv6.join(':');
+			// seems no need add [] for ipv6
 			break;
 		default:
-			return { hasError: true, message: `invalid addressType: ${addressType}` };
+			return {
+				hasError: true,
+				message: `invild  addressType is ${addressType}`,
+			};
 	}
-
 	if (!addressValue) {
-		return { hasError: true, message: `addressValue is empty, addressType is ${addressType}` };
+		return {
+			hasError: true,
+			message: `addressValue is empty, addressType is ${addressType}`,
+		};
 	}
 
 	return {
 		hasError: false,
 		addressRemote: addressValue,
-		addressType,
 		portRemote,
 		rawDataIndex: addressValueIndex + addressLength,
-		protocolVersion: new Uint8Array([version]),
-		isUDP: command === 2
+		channelVersion: version,
+		isUDP,
+		addressType,
 	};
 }
 
 /**
- * Converts remote socket connection to WebSocket.
- * Handles data transfer between socket and WebSocket.
- * @param {Socket} remoteSocket - Remote socket connection
- * @param {WebSocket} webSocket - WebSocket connection
- * @param {ArrayBuffer} protocolResponseHeader - Protocol response header
- * @param {Function} retry - Retry function for failed connections
- * @param {Function} log - Logging function
+ * Converts a remote socket to a WebSocket connection.
+ * @param {import("@cloudflare/workers-types").Socket} remoteSocket The remote socket to convert.
+ * @param {import("@cloudflare/workers-types").WebSocket} webSocket The WebSocket to connect to.
+ * @param {ArrayBuffer | null} channelResponseHeader The channel response header.
+ * @param {(() => Promise<void>) | null} retry The function to retry the connection if it fails.
+ * @param {(info: string) => void} log The logging function.
+ * @returns {Promise<void>} A Promise that resolves when the conversion is complete.
  */
-async function RemoteSocketToWS(remoteSocket, webSocket, protocolResponseHeader, retry, log) {
-	let hasIncomingData = false;
-
-	try {
-		await remoteSocket.readable.pipeTo(
+async function remoteSocketToWS(remoteSocket, webSocket, channelResponseHeader, retry, log) {
+	// remote--> ws
+	let remoteChunkCount = 0;
+	let chunks = [];
+	/** @type {ArrayBuffer | null} */
+	let channelHeader = channelResponseHeader;
+	let hasIncomingData = false; // check if remoteSocket has incoming data
+	await remoteSocket.readable
+		.pipeTo(
 			new WritableStream({
-				async write(chunk) {
-					if (webSocket.readyState !== WS_READY_STATE_OPEN) {
-						throw new Error('WebSocket is not open');
-					}
-
+				start() {
+				},
+				/**
+				 *
+				 * @param {Uint8Array} chunk
+				 * @param {*} controller
+				 */
+				async write(chunk, controller) {
 					hasIncomingData = true;
-
-					if (protocolResponseHeader) {
-						webSocket.send(await new Blob([protocolResponseHeader, chunk]).arrayBuffer());
-						protocolResponseHeader = null;
+					remoteChunkCount++;
+					if (webSocket.readyState !== WS_READY_STATE_OPEN) {
+						controller.error(
+							'webSocket.readyState is not open, maybe close'
+						);
+					}
+					if (channelHeader) {
+						webSocket.send(await new Blob([channelHeader, chunk]).arrayBuffer());
+						channelHeader = null;
 					} else {
+						// console.log(`remoteSocketToWS send chunk ${chunk.byteLength}`);
+						// seems no need rate limit this, CF seems fix this??..
+						// if (remoteChunkCount > 20000) {
+						// 	// cf one package is 4096 byte(4kb),  4096 * 20000 = 80M
+						// 	await delay(1);
+						// }
 						webSocket.send(chunk);
 					}
 				},
 				close() {
-					log(`Remote connection readable closed. Had incoming data: ${hasIncomingData}`);
+					log(`remoteConnection!.readable is close with hasIncomingData is ${hasIncomingData}`);
+					// safeCloseWebSocket(webSocket); // no need server close websocket frist for some case will casue HTTP ERR_CONTENT_LENGTH_MISMATCH issue, client will send close event anyway.
 				},
 				abort(reason) {
-					console.error(`Remote connection readable aborted:`, reason);
+					console.error(`remoteConnection!.readable abort`, reason);
 				},
 			})
-		);
-	} catch (error) {
-		console.error(`RemoteSocketToWS error:`, error.stack || error);
-		safeCloseWebSocket(webSocket);
-	}
+		)
+		.catch((error) => {
+			console.error(
+				`remoteSocketToWS has exception `,
+				error.stack || error
+			);
+			safeCloseWebSocket(webSocket);
+		});
 
-	if (!hasIncomingData && retry) {
-		log(`No incoming data, retrying`);
-		await retry();
+	// seems is cf connect socket have error,
+	// 1. Socket.closed will have error
+	// 2. Socket.readable will be close without any data coming
+	if (hasIncomingData === false && retry) {
+		log(`retry`)
+		retry();
 	}
-}
-
-/**
- * Converts base64 string to ArrayBuffer.
- * @param {string} base64Str - Base64 encoded string
- * @returns {Object} Object containing decoded data or error
- */
-function base64ToArrayBuffer(base64Str) {
-	if (!base64Str) {
-		return { earlyData: null, error: null };
-	}
-	try {
-		// Convert modified Base64 for URL (RFC 4648) to standard Base64
-		base64Str = base64Str.replace(/-/g, '+').replace(/_/g, '/');
-		// Decode Base64 string
-		const binaryStr = atob(base64Str);
-		// Convert binary string to ArrayBuffer
-		const buffer = new ArrayBuffer(binaryStr.length);
-		const view = new Uint8Array(buffer);
-		for (let i = 0; i < binaryStr.length; i++) {
-			view[i] = binaryStr.charCodeAt(i);
-		}
-		return { earlyData: buffer, error: null };
-	} catch (error) {
-		return { earlyData: null, error };
-	}
-}
-
-/**
- * Validates UUID format.
- * @param {string} uuid - UUID string to validate
- * @returns {boolean} True if valid UUID
- */
-function isValidUUID(uuid) {
-	// More precise UUID regex pattern
-	const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-	return uuidRegex.test(uuid);
 }
 
 const WS_READY_STATE_OPEN = 1;
 const WS_READY_STATE_CLOSING = 2;
-
 /**
- * Safely closes WebSocket connection.
- * Prevents exceptions during WebSocket closure.
- * @param {WebSocket} socket - WebSocket to close
+ * Closes a WebSocket connection safely without throwing exceptions.
+ * @param {import("@cloudflare/workers-types").WebSocket} socket The WebSocket connection to close.
  */
 function safeCloseWebSocket(socket) {
 	try {
@@ -763,686 +1843,233 @@ function safeCloseWebSocket(socket) {
 			socket.close();
 		}
 	} catch (error) {
-		console.error('safeCloseWebSocket error:', error);
+		console.error('safeCloseWebSocket error', error);
 	}
 }
 
-const byteToHex = Array.from({ length: 256 }, (_, i) => (i + 0x100).toString(16).slice(1));
-
 /**
- * Converts byte array to hex string without validation.
- * @param {Uint8Array} arr - Byte array to convert
- * @param {number} offset - Starting offset
- * @returns {string} Hex string
+ * Handles outbound UDP traffic by transforming the data into DNS queries and sending them over a WebSocket connection.
+ * @param {import("@cloudflare/workers-types").WebSocket} webSocket The WebSocket connection to send the DNS queries over.
+ * @param {ArrayBuffer} channelResponseHeader The channel response header.
+ * @param {(string) => void} log The logging function.
+ * @returns {{write: (chunk: Uint8Array) => void}} An object with a write method that accepts a Uint8Array chunk to write to the transform stream.
  */
-function unsafeStringify(arr, offset = 0) {
-	return [
-		byteToHex[arr[offset]],
-		byteToHex[arr[offset + 1]],
-		byteToHex[arr[offset + 2]],
-		byteToHex[arr[offset + 3]],
-		'-',
-		byteToHex[arr[offset + 4]],
-		byteToHex[arr[offset + 5]],
-		'-',
-		byteToHex[arr[offset + 6]],
-		byteToHex[arr[offset + 7]],
-		'-',
-		byteToHex[arr[offset + 8]],
-		byteToHex[arr[offset + 9]],
-		'-',
-		byteToHex[arr[offset + 10]],
-		byteToHex[arr[offset + 11]],
-		byteToHex[arr[offset + 12]],
-		byteToHex[arr[offset + 13]],
-		byteToHex[arr[offset + 14]],
-		byteToHex[arr[offset + 15]]
-	].join('').toLowerCase();
+async function handleUDPOutBound(webSocket, channelResponseHeader, log) {
+
+	let ischannelHeaderSent = false;
+	const transformStream = new TransformStream({
+		start(controller) {
+
+		},
+		transform(chunk, controller) {
+			// udp message 2 byte is the the length of udp data
+			// TODO: this should have bug, beacsue maybe udp chunk can be in two websocket message
+			for (let index = 0; index < chunk.byteLength;) {
+				const lengthBuffer = chunk.slice(index, index + 2);
+				const udpPakcetLength = new DataView(lengthBuffer).getUint16(0);
+				const udpData = new Uint8Array(
+					chunk.slice(index + 2, index + 2 + udpPakcetLength)
+				);
+				index = index + 2 + udpPakcetLength;
+				controller.enqueue(udpData);
+			}
+		},
+		flush(controller) {
+		}
+	});
+
+	// only handle dns udp for now
+	transformStream.readable.pipeTo(new WritableStream({
+		async write(chunk) {
+			const resp = await fetch(dohURL, // dns server url
+				{
+					method: 'POST',
+					headers: {
+						'content-type': 'application/dns-message',
+					},
+					body: chunk,
+				})
+			const dnsQueryResult = await resp.arrayBuffer();
+			const udpSize = dnsQueryResult.byteLength;
+			// console.log([...new Uint8Array(dnsQueryResult)].map((x) => x.toString(16)));
+			const udpSizeBuffer = new Uint8Array([(udpSize >> 8) & 0xff, udpSize & 0xff]);
+			if (webSocket.readyState === WS_READY_STATE_OPEN) {
+				log(`doh success and dns message length is ${udpSize}`);
+				if (ischannelHeaderSent) {
+					webSocket.send(await new Blob([udpSizeBuffer, dnsQueryResult]).arrayBuffer());
+				} else {
+					webSocket.send(await new Blob([channelResponseHeader, udpSizeBuffer, dnsQueryResult]).arrayBuffer());
+					ischannelHeaderSent = true;
+				}
+			}
+		}
+	})).catch((error) => {
+		log('dns udp has error' + error)
+	});
+
+	const writer = transformStream.writable.getWriter();
+
+	return {
+		/**
+		 *
+		 * @param {Uint8Array} chunk
+		 */
+		write(chunk) {
+			writer.write(chunk);
+		}
+	};
 }
 
 /**
- * Safely converts byte array to hex string with validation.
- * @param {Uint8Array} arr - Byte array to convert
- * @param {number} offset - Starting offset
- * @returns {string} Hex string
+ * Handles outbound UDP traffic by transforming the data into DNS queries and sending them over a WebSocket connection.
+ * @param {ArrayBuffer} udpChunk - DNS query data sent from the client.
+ * @param {import("@cloudflare/workers-types").WebSocket} webSocket - The WebSocket connection to send the DNS queries over.
+ * @param {ArrayBuffer} channelResponseHeader - The channel response header.
+ * @param {(string) => void} log - The logging function.
+ * @returns {{write: (chunk: Uint8Array) => void}} An object with a write method that accepts a Uint8Array chunk to write to the transform stream.
  */
-function stringify(arr, offset = 0) {
-	const uuid = unsafeStringify(arr, offset);
-	if (!isValidUUID(uuid)) {
-		throw new TypeError("Stringified UUID is invalid");
-	}
-	return uuid;
-}
-
-/**
- * Handles DNS query through UDP.
- * Processes DNS requests and forwards them.
- * @param {ArrayBuffer} udpChunk - UDP data chunk
- * @param {WebSocket} webSocket - WebSocket connection
- * @param {ArrayBuffer} protocolResponseHeader - Protocol response header
- * @param {Function} log - Logging function
- */
-async function handleDNSQuery(udpChunk, webSocket, protocolResponseHeader, log) {
-	// no matter which DNS server client send, we alwasy use hard code one.
-	// beacsue someof DNS server is not support DNS over TCP
+async function handleDNSQuery(udpChunk, webSocket, channelResponseHeader, log) {
 	try {
-		const dnsServer = '8.8.4.4'; // change to 1.1.1.1 after cf fix connect own ip bug
+		const dnsServer = '8.8.4.4';
 		const dnsPort = 53;
-		/** @type {ArrayBuffer | null} */
-		let vlessHeader = protocolResponseHeader;
-		/** @type {import("@cloudflare/workers-types").Socket} */
-		const tcpSocket = connect({
-			hostname: dnsServer,
-			port: dnsPort,
-		});
+		let channelHeader = channelResponseHeader;
 
-		log(`connected to ${dnsServer}:${dnsPort}`);
+		const tcpSocket = connect({ hostname: dnsServer, port: dnsPort });
+		log(`Connected to ${dnsServer}:${dnsPort}`);
+
 		const writer = tcpSocket.writable.getWriter();
 		await writer.write(udpChunk);
 		writer.releaseLock();
+
 		await tcpSocket.readable.pipeTo(new WritableStream({
 			async write(chunk) {
 				if (webSocket.readyState === WS_READY_STATE_OPEN) {
-					if (vlessHeader) {
-						webSocket.send(await new Blob([vlessHeader, chunk]).arrayBuffer());
-						vlessHeader = null;
-					} else {
-						webSocket.send(chunk);
-					}
+					const dataToSend = channelHeader ? await new Blob([channelHeader, chunk]).arrayBuffer() : chunk;
+					webSocket.send(dataToSend);
+					channelHeader = null;
 				}
 			},
 			close() {
-				log(`dns server(${dnsServer}) tcp is close`);
+				log(`TCP connection to DNS server (${dnsServer}) closed`);
 			},
 			abort(reason) {
-				console.error(`dns server(${dnsServer}) tcp is abort`, reason);
+				console.error(`TCP connection to DNS server (${dnsServer}) aborted`, reason);
 			},
 		}));
 	} catch (error) {
-		console.error(
-			`handleDNSQuery have exception, error: ${error.message}`
-		);
+		console.error(`Exception in handleDNSQuery function: ${error.message}`);
 	}
 }
 
-/**
- * Establishes SOCKS5 proxy connection.
- * @param {number} addressType - Type of address
- * @param {string} addressRemote - Remote address
- * @param {number} portRemote - Remote port
- * @param {Function} log - Logging function
- * @returns {Promise<Socket>} Connected socket
- */
-async function socks5Connect(addressType, addressRemote, portRemote, log) {
-	const { username, password, hostname, port } = parsedSocks5Address;
-	// Connect to the SOCKS server
-	const socket = connect({
-		hostname,
-		port,
-	});
 
-	// Request head format (Worker -> Socks Server):
-	// +----+----------+----------+
-	// |VER | NMETHODS | METHODS  |
-	// +----+----------+----------+
-	// | 1  |    1     | 1 to 255 |
-	// +----+----------+----------+
-
-	// https://en.wikipedia.org/wiki/SOCKS#SOCKS5
-	// For METHODS:
-	// 0x00 NO AUTHENTICATION REQUIRED
-	// 0x02 USERNAME/PASSWORD https://datatracker.ietf.org/doc/html/rfc1929
-	const socksGreeting = new Uint8Array([5, 2, 0, 2]);
-
+async function socks5Connect(ipType, remoteIp, remotePort, log) {
+	const { username, password, hostname, port } = parsedSocks5;
+	const socket = connect({ hostname, port });
 	const writer = socket.writable.getWriter();
-
-	await writer.write(socksGreeting);
-	log('sent socks greeting');
-
 	const reader = socket.readable.getReader();
 	const encoder = new TextEncoder();
-	let res = (await reader.read()).value;
-	// Response format (Socks Server -> Worker):
-	// +----+--------+
-	// |VER | METHOD |
-	// +----+--------+
-	// | 1  |   1    |
-	// +----+--------+
-	if (res[0] !== 0x05) {
-		log(`socks server version error: ${res[0]} expected: 5`);
-		return;
-	}
-	if (res[1] === 0xff) {
-		log("no acceptable methods");
-		return;
-	}
 
-	// if return 0x0502
-	if (res[1] === 0x02) {
-		log("socks server needs auth");
-		if (!username || !password) {
-			log("please provide username/password");
-			return;
+	const sendSocksGreeting = async () => {
+		const greeting = new Uint8Array([5, 2, 0, 2]);
+		await writer.write(greeting);
+		console.log('SOCKS5 greeting sent');
+	};
+
+	const handleAuthResponse = async () => {
+		const res = (await reader.read()).value;
+		if (res[1] === 0x02) {
+			console.log("SOCKS5 server requires authentication");
+			if (!username || !password) {
+				console.log("Please provide username and password");
+				throw new Error("Authentication required");
+			}
+			const authRequest = new Uint8Array([
+				1, username.length, ...encoder.encode(username),
+				password.length, ...encoder.encode(password)
+			]);
+			await writer.write(authRequest);
+			const authResponse = (await reader.read()).value;
+			if (authResponse[0] !== 0x01 || authResponse[1] !== 0x00) {
+				console.log("SOCKS5 server authentication failed");
+				throw new Error("Authentication failed");
+			}
 		}
-		// +----+------+----------+------+----------+
-		// |VER | ULEN |  UNAME   | PLEN |  PASSWD  |
-		// +----+------+----------+------+----------+
-		// | 1  |  1   | 1 to 255 |  1   | 1 to 255 |
-		// +----+------+----------+------+----------+
-		const authRequest = new Uint8Array([
-			1,
-			username.length,
-			...encoder.encode(username),
-			password.length,
-			...encoder.encode(password)
-		]);
-		await writer.write(authRequest);
-		res = (await reader.read()).value;
-		// expected 0x0100
-		if (res[0] !== 0x01 || res[1] !== 0x00) {
-			log("fail to auth socks server");
-			return;
+	};
+
+	const sendSocksRequest = async () => {
+		let DSTADDR;
+		switch (ipType) {
+			case 1:
+				DSTADDR = new Uint8Array([1, ...remoteIp.split('.').map(Number)]);
+				break;
+			case 2:
+				DSTADDR = new Uint8Array([3, remoteIp.length, ...encoder.encode(remoteIp)]);
+				break;
+			case 3:
+				DSTADDR = new Uint8Array([4, ...remoteIp.split(':').flatMap(x => [
+					parseInt(x.slice(0, 2), 16), parseInt(x.slice(2), 16)
+				])]);
+				break;
+			default:
+				console.log(`Invalid address type: ${ipType}`);
+				throw new Error("Invalid address type");
 		}
-	}
+		const socksRequest = new Uint8Array([5, 1, 0, ...DSTADDR, remotePort >> 8, remotePort & 0xff]);
+		await writer.write(socksRequest);
+		console.log('SOCKS5 request sent');
 
-	// Request data format (Worker -> Socks Server):
-	// +----+-----+-------+------+----------+----------+
-	// |VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
-	// +----+-----+-------+------+----------+----------+
-	// | 1  |  1  | X'00' |  1   | Variable |    2     |
-	// +----+-----+-------+------+----------+----------+
-	// ATYP: address type of following address
-	// 0x01: IPv4 address
-	// 0x03: Domain name
-	// 0x04: IPv6 address
-	// DST.ADDR: desired destination address
-	// DST.PORT: desired destination port in network octet order
+		const response = (await reader.read()).value;
+		if (response[1] !== 0x00) {
+			console.log("SOCKS5 connection failed");
+			throw new Error("Connection failed");
+		}
+		console.log("SOCKS5 connection established");
+	};
 
-	// addressType
-	// 1--> ipv4  addressLength =4
-	// 2--> domain name
-	// 3--> ipv6  addressLength =16
-	let DSTADDR;	// DSTADDR = ATYP + DST.ADDR
-	switch (addressType) {
-		case 1:
-			DSTADDR = new Uint8Array(
-				[1, ...addressRemote.split('.').map(Number)]
-			);
-			break;
-		case 2:
-			DSTADDR = new Uint8Array(
-				[3, addressRemote.length, ...encoder.encode(addressRemote)]
-			);
-			break;
-		case 3:
-			DSTADDR = new Uint8Array(
-				[4, ...addressRemote.split(':').flatMap(x => [parseInt(x.slice(0, 2), 16), parseInt(x.slice(2), 16)])]
-			);
-			break;
-		default:
-			log(`invild  addressType is ${addressType}`);
-			return;
+	try {
+		await sendSocksGreeting();
+		await handleAuthResponse();
+		await sendSocksRequest();
+	} catch (error) {
+		console.log(error.message);
+		return null; // Return null on failure
+	} finally {
+		writer.releaseLock();
+		reader.releaseLock();
 	}
-	const socksRequest = new Uint8Array([5, 1, 0, ...DSTADDR, portRemote >> 8, portRemote & 0xff]);
-	await writer.write(socksRequest);
-	log('sent socks request');
-
-	res = (await reader.read()).value;
-	// Response format (Socks Server -> Worker):
-	//  +----+-----+-------+------+----------+----------+
-	// |VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
-	// +----+-----+-------+------+----------+----------+
-	// | 1  |  1  | X'00' |  1   | Variable |    2     |
-	// +----+-----+-------+------+----------+----------+
-	if (res[1] === 0x00) {
-		log("socks connection opened");
-	} else {
-		log("fail to open socks connection");
-		return;
-	}
-	writer.releaseLock();
-	reader.releaseLock();
 	return socket;
 }
 
-/**
- * Parses SOCKS5 address string.
- * @param {string} address - SOCKS5 address string
- * @returns {Object} Parsed address information
- */
-function socks5AddressParser(address) {
-	let [latter, former] = address.split("@").reverse();
-	let username, password, hostname, port;
-	if (former) {
-		const formers = former.split(":");
-		if (formers.length !== 2) {
-			throw new Error('Invalid SOCKS address format');
+
+/** -------------------Home page-------------------------------- */
+async function nginx() {
+	const text = `
+	<!DOCTYPE html>
+	<html>
+	<head>
+	<meta charset="UTF-8">
+	<title>Welcome to nginx!</title>
+	<style>
+		body {
+			width: 35em;
+			margin: 0 auto;
+			font-family: Tahoma, Verdana, Arial, sans-serif;
 		}
-		[username, password] = formers;
-	}
-	const latters = latter.split(":");
-	port = Number(latters.pop());
-	if (isNaN(port)) {
-		throw new Error('Invalid SOCKS address format');
-	}
-	hostname = latters.join(":");
-	const regex = /^\[.*\]$/;
-	if (hostname.includes(":") && !regex.test(hostname)) {
-		throw new Error('Invalid SOCKS address format');
-	}
-	return {
-		username,
-		password,
-		hostname,
-		port,
-	}
-}
+	</style>
+	</head>
+	<body>
+	<h1>Welcome to nginx!</h1>
+	<p>If you see this page, the nginx web server is successfully installed and
+	working. Further configuration is required.</p>
 
-const at = 'QA==';
-const pt = 'dmxlc3M=';
-const ed = 'RUR0dW5uZWw=';
+	<p>For online documentation and support please refer to
+	<a href="http://nginx.org/">nginx.org</a>.<br/>
+	Commercial support is available at
+	<a href="http://nginx.com/">nginx.com</a>.</p>
 
-/**
- * Generates configuration for VLESS client.
- * @param {string} userIDs - Single or comma-separated user IDs
- * @param {string} hostName - Host name for configuration
- * @param {string|string[]} proxyIP - Proxy IP address or array of addresses
- * @returns {string} Configuration HTML
- */
-function getConfig(userIDs, hostName, proxyIP) {
-	const commonUrlPart = `?encryption=none&security=tls&sni=${hostName}&fp=randomized&type=ws&host=${hostName}&path=%2F%3Fed%3D2048#${hostName}`;
-
-	// Split the userIDs into an array
-	const userIDArray = userIDs.split(",");
-
-	// Prepare output string for each userID
-	const sublink = `https://${hostName}/sub/${userIDArray[0]}?format=clash`
-	const subbestip = `https://${hostName}/bestip/${userIDArray[0]}`;
-	const clash_link = `https://url.v1.mk/sub?target=clash&url=${encodeURIComponent(`https://${hostName}/sub/${userIDArray[0]}?format=clash`)}&insert=false&emoji=true&list=false&tfo=false&scv=true&fdn=false&sort=false&new_name=true`;
-	// HTML Head with CSS and FontAwesome library
-	const htmlHead = `
-  <head>
-    <title>EDtunnel: Configuration</title>
-    <meta name='viewport' content='width=device-width, initial-scale=1'>
-    <meta property='og:site_name' content='EDtunnel: Protocol Configuration' />
-    <meta property='og:type' content='website' />
-    <meta property='og:title' content='EDtunnel - Protocol Configuration and Subscribe Output' />
-    <meta property='og:description' content='Use Cloudflare Pages and Worker serverless to implement protocol' />
-    <meta property='og:url' content='https://${hostName}/' />
-    <meta property='og:image' content='https://cdn.jsdelivr.net/gh/6Kmfi6HP/EDtunnel@refs/heads/main/image/logo.png' />
-    <meta name='twitter:card' content='summary_large_image' />
-    <meta name='twitter:title' content='EDtunnel - Protocol Configuration and Subscribe Output' />
-    <meta name='twitter:description' content='Use Cloudflare Pages and Worker serverless to implement protocol' />
-    <meta name='twitter:url' content='https://${hostName}/' />
-    <meta name='twitter:image' content='https://cdn.jsdelivr.net/gh/6Kmfi6HP/EDtunnel@refs/heads/main/image/logo.png' />
-    <meta property='og:image:width' content='1500' />
-    <meta property='og:image:height' content='1500' />
-
-    <style>
-      body {
-        font-family: 'Roboto', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        background-color: #000000;
-        color: #ffffff;
-        line-height: 1.6;
-        padding: 20px;
-        max-width: 1200px;
-        margin: 0 auto;
-      }
-      .container {
-        background-color: #111111;
-        border-radius: 8px;
-        box-shadow: 0 4px 6px rgba(255, 255, 255, 0.1);
-        padding: 20px;
-        margin-bottom: 20px;
-      }
-      h1, h2 {
-        color: #ffffff;
-      }
-      .config-item {
-        background-color: #222222;
-        border: 1px solid #333333;
-        border-radius: 4px;
-        padding: 15px;
-        margin-bottom: 15px;
-      }
-      .config-item h3 {
-        margin-top: 0;
-        color: #ffffff;
-      }
-      .btn {
-        background-color: #ffffff;
-        color: #000000;
-        border: none;
-        padding: 10px 15px;
-        border-radius: 4px;
-        cursor: pointer;
-        transition: background-color 0.3s, color 0.3s;
-      }
-      .btn:hover {
-        background-color: #cccccc;
-      }
-      .btn-group {
-        margin-top: 10px;
-      }
-      .btn-group .btn {
-        margin-right: 10px;
-      }
-      pre {
-        background-color: #333333;
-        border: 1px solid #444444;
-        border-radius: 4px;
-        padding: 10px;
-        white-space: pre-wrap;
-        word-wrap: break-word;
-        color: #00ff00;
-      }
-      .logo {
-        float: left;
-        margin-right: 20px;
-        margin-bottom: 20px;
-		max-width: 30%;
-      }
-      @media (max-width: 768px) {
-        .logo {
-          float: none;
-          display: block;
-          margin: 0 auto 20px;
-          max-width: 90%; /* Adjust the max-width to fit within the container */
-        }
-        .btn-group {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-        }
-        .btn-group .btn {
-          margin-bottom: 10px;
-          width: 100%;
-          text-align: center;
-        }
-      }
-      .code-container {
-        position: relative;
-        margin-bottom: 15px;
-      }
-      .code-container pre {
-        margin: 0;
-        padding-right: 100px; /* Make space for the button */
-      }
-      .copy-btn {
-        position: absolute;
-        top: 5px;
-        right: 5px;
-        padding: 5px 10px;
-        font-size: 0.8em;
-      }
-      .subscription-info {
-        margin-top: 20px;
-        background-color: #222222;
-        border-radius: 4px;
-        padding: 15px;
-      }
-      .subscription-info h3 {
-        color: #ffffff;
-        margin-top: 0;
-      }
-      .subscription-info ul {
-        padding-left: 20px;
-      }
-      .subscription-info li {
-        margin-bottom: 10px;
-      }
-    </style>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
-  </head>
-  `;
-
-	const header = `
-    <div class="container">
-      <h1>EDtunnel: Protocol Configuration</h1>
-      <img src="https://cdn.jsdelivr.net/gh/6Kmfi6HP/EDtunnel@refs/heads/main/image/logo.png" alt="EDtunnel Logo" class="logo">
-      <p>Welcome! This function generates configuration for the vless protocol. If you found this useful, please check our GitHub project:</p>
-      <p><a href="https://github.com/6Kmfi6HP/EDtunnel" target="_blank" style="color: #00ff00;">EDtunnel - https://github.com/6Kmfi6HP/EDtunnel</a></p>
-      <div style="clear: both;"></div>
-      <div class="btn-group">
-        <a href="//${hostName}/sub/${userIDArray[0]}" class="btn" target="_blank"><i class="fas fa-link"></i> VLESS Subscription</a>
-        <a href="clash://install-config?url=${encodeURIComponent(`https://${hostName}/sub/${userIDArray[0]}?format=clash`)}" class="btn" target="_blank"><i class="fas fa-bolt"></i> Clash Subscription</a>
-        <a href="${clash_link}" class="btn" target="_blank"><i class="fas fa-bolt"></i> Clash Link</a>
-        <a href="${subbestip}" class="btn" target="_blank"><i class="fas fa-star"></i> Best IP Subscription</a>
-      </div>
-      <div class="subscription-info">
-        <h3>Options Explained:</h3>
-        <ul>
-          <li><strong>VLESS Subscription:</strong> Direct link for VLESS protocol configuration. Suitable for clients supporting VLESS.</li>
-          <li><strong>Clash Subscription:</strong> Opens the Clash client with pre-configured settings. Best for Clash users on mobile devices.</li>
-          <li><strong>Clash Link:</strong> A web link to convert the VLESS config to Clash format. Useful for manual import or troubleshooting.</li>
-          <li><strong>Best IP Subscription:</strong> Provides a curated list of optimal server IPs for many <b>different countries</b>.</li>
-        </ul>
-        <p>Choose the option that best fits your client and needs. For most users, the VLESS or Clash Subscription will be the easiest to use.</p>
-      </div>
-    </div>
-  `;
-
-	const configOutput = userIDArray.map((userID) => {
-		const protocolMain = atob(pt) + '://' + userID + atob(at) + hostName + ":443" + commonUrlPart;
-		const protocolSec = atob(pt) + '://' + userID + atob(at) + proxyIP[0].split(':')[0] + ":" + proxyPort + commonUrlPart;
-		return `
-      <div class="container config-item">
-        <h2>UUID: ${userID}</h2>
-        <h3>Default IP Configuration</h3>
-        <div class="code-container">
-          <pre><code>${protocolMain}</code></pre>
-          <button class="btn copy-btn" onclick='copyToClipboard("${protocolMain}")'><i class="fas fa-copy"></i> Copy</button>
-        </div>
-        
-        <h3>Best IP Configuration</h3>
-        <div class="input-group mb-3">
-          <select class="form-select" id="proxySelect" onchange="updateProxyConfig()">
-            ${typeof proxyIP === 'string' ? 
-              `<option value="${proxyIP}">${proxyIP}</option>` : 
-              Array.from(proxyIP).map(proxy => `<option value="${proxy}">${proxy}</option>`).join('')}
-          </select>
-        </div>
-		<br>
-        <div class="code-container">
-          <pre><code id="proxyConfig">${protocolSec}</code></pre>
-          <button class="btn copy-btn" onclick='copyToClipboard(document.getElementById("proxyConfig").textContent)'><i class="fas fa-copy"></i> Copy</button>
-        </div>
-      </div>
-    `;
-	}).join('');
-
-	return `
-  <html>
-  ${htmlHead}
-  <body>
-    ${header}
-    ${configOutput}
-    <script>
-      const userIDArray = ${JSON.stringify(userIDArray)};
-      const pt = "${pt}";
-      const at = "${at}";
-      const commonUrlPart = "?encryption=none&security=tls&sni=${hostName}&fp=randomized&type=ws&host=${hostName}&path=%2F%3Fed%3D2048#${hostName}";
-
-      function copyToClipboard(text) {
-        navigator.clipboard.writeText(text)
-          .then(() => {
-            alert("Copied to clipboard");
-          })
-          .catch((err) => {
-            console.error("Failed to copy to clipboard:", err);
-          });
-      }
-
-      function updateProxyConfig() {
-        const select = document.getElementById('proxySelect');
-        const proxyValue = select.value;
-        const [host, port] = proxyValue.split(':');
-        const protocolSec = atob(pt) + '://' + userIDArray[0] + atob(at) + host + ":" + port + commonUrlPart;
-        document.getElementById("proxyConfig").textContent = protocolSec;
-      }
-    </script>
-  </body>
-  </html>`;
-}
-
-const HttpPort = new Set([80, 8080, 8880, 2052, 2086, 2095, 2082]);
-const HttpsPort = new Set([443, 8443, 2053, 2096, 2087, 2083]);
-
-/**
- * Generates subscription content.
- * @param {string} userID_path - User ID path
- * @param {string} hostname - Host name
- * @param {string|string[]} proxyIP - Proxy IP address or array of addresses
- * @returns {string} Subscription content
- */
-function GenSub(userID_path, hostname, proxyIP) {
-	// Add all CloudFlare public CNAME domains
-	const mainDomains = new Set([
-		hostname,
-		// public domains
-		'icook.hk',
-		'104.19.96.0',
-		'104.20.32.0',
-		'104.20.128.0',
-		'104.24.160.0',
-		'104.22.0.0',
-		'104.20.64.0',
-		'104.17.192.0',
-		'104.17.160.0',
-		'104.22.64.0',
-		'104.17.128.0',
-		'104.18.128.0',
-		'104.16.32.0',
-		'104.23.128.0',
-		'104.16.160.0',
-		'104.17.96.0',
-		'104.20.224.0',
-		'104.19.0.0',
-		'104.19.224.0',
-		'104.25.32.0',
-		'104.19.128.0',
-		'104.19.64.0',
-		'104.16.192.0',
-		'104.16.64.0',
-		'104.17.32.0',
-		'104.25.64.0',
-		'104.23.96.0',
-		'104.16.0.0',
-		'104.18.192.0',
-		'104.24.192.0',
-		'104.25.96.0',
-		'104.18.160.0',
-		'104.18.96.0',
-		'104.24.128.0',
-		'104.16.224.0',
-		'104.18.64.0',
-		'104.18.224.0',
-		'104.18.0.0',
-		'104.16.96.0',
-		'104.24.64.0',
-		'104.19.160.0',
-		'104.25.0.0',
-		'104.17.0.0',
-		'104.17.224.0',
-		'104.24.32.0',
-		'104.18.32.0',
-		'104.24.0.0',
-		'104.16.128.0',
-	    'www.visa.cn',
-		// 高频率更新
-		// 'speed.marisalnc.com',           // 1000ip/3min
-		'freeyx.cloudflare88.eu.org',    // 1000ip/3min
-		'cloudflare.182682.xyz',         // 15ip/15min
-		// '115155.xyz',                    // 18ip/1小时
-		// 'cdn.2020111.xyz',               // 15ip/10min
-		'cfip.cfcdn.vip',                // 6ip/1天
-		proxyIPs,
-		// 手动更新和未知频率
-		'cf.0sm.com',                    // 手动更新
-		'cloudflare-ip.mofashi.ltd',     // 未知频率
-		'cf.090227.xyz',                 // 未知频率
-		// 'cname.xirancdn.us',             // 未知频率
-		// 'f3058171cad.002404.xyz',        // 未知频率
-		'cf.zhetengsha.eu.org',          // 未知频率
-		'cloudflare.9jy.cc',             // 未知频率
-		// '8.889288.xyz',                  // 未知频率
-		'cf.zerone-cdn.pp.ua',           // 未知频率
-		'cfip.1323123.xyz',              // 未知频率
-		'cdn.tzpro.xyz',                 // 未知频率
-		'cf.877771.xyz',                 // 未知频率
-		'cnamefuckxxs.yuchen.icu',       // 未知频率
-		'cfip.xxxxxxxx.tk',              // OTC大佬提供维护
-	]);
-
-	const userIDArray = userID_path.includes(',') ? userID_path.split(",") : [userID_path];
-	const proxyIPArray = Array.isArray(proxyIP) ? proxyIP : (proxyIP ? (proxyIP.includes(',') ? proxyIP.split(',') : [proxyIP]) : proxyIPs);
-	const randomPath = () => '/' + Math.random().toString(36).substring(2, 15) + '?ed=2048';
-	const commonUrlPartHttp = `?encryption=none&security=none&fp=random&type=ws&host=${hostname}&path=${encodeURIComponent(randomPath())}#`;
-	const commonUrlPartHttps = `?encryption=none&security=tls&sni=${hostname}&fp=random&type=ws&host=${hostname}&path=%2F%3Fed%3D2048#`;
-
-	const result = userIDArray.flatMap((userID) => {
-		let allUrls = [];
-		// Generate main HTTP URLs first for all domains
-		if (!hostname.includes('pages.dev')) {
-			mainDomains.forEach(domain => {
-				Array.from(HttpPort).forEach((port) => {
-					const urlPart = `${hostname.split('.')[0]}-${domain}-HTTP-${port}`;
-					const mainProtocolHttp = atob(pt) + '://' + userID + atob(at) + domain + ':' + port + commonUrlPartHttp + urlPart;
-					allUrls.push(mainProtocolHttp);
-				});
-			});
-		}
-
-		// Generate main HTTPS URLs for all domains
-		mainDomains.forEach(domain => {
-			Array.from(HttpsPort).forEach((port) => {
-				const urlPart = `${hostname.split('.')[0]}-${domain}-HTTPS-${port}`;
-				const mainProtocolHttps = atob(pt) + '://' + userID + atob(at) + domain + ':' + port + commonUrlPartHttps + urlPart;
-				allUrls.push(mainProtocolHttps);
-			});
-		});
-
-		// Generate proxy HTTPS URLs
-		proxyIPArray.forEach((proxyAddr) => {
-			const [proxyHost, proxyPort = '443'] = proxyAddr.split(':');
-			const urlPart = `${hostname.split('.')[0]}-${proxyHost}-HTTPS-${proxyPort}`;
-			const secondaryProtocolHttps = atob(pt) + '://' + userID + atob(at) + proxyHost + ':' + proxyPort + commonUrlPartHttps + urlPart + '-' + atob(ed);
-			allUrls.push(secondaryProtocolHttps);
-		});
-
-		return allUrls;
-	});
-
-	return btoa(result.join('\n'));
-	// return result.join('\n');
-}
-
-/**
- * Handles proxy configuration and returns standardized proxy settings
- * @param {string} PROXYIP - Proxy IP configuration from environment
- * @returns {{ip: string, port: string}} Standardized proxy configuration
- */
-function handleProxyConfig(PROXYIP) {
-	if (PROXYIP) {
-		const proxyAddresses = PROXYIP.split(',').map(addr => addr.trim());
-		const selectedProxy = selectRandomAddress(proxyAddresses);
-		const [ip, port = '443'] = selectedProxy.split(':');
-		return { ip, port };
-	} else {
-		const port = proxyIP.includes(':') ? proxyIP.split(':')[1] : '443';
-		const ip = proxyIP.split(':')[0];
-		return { ip, port };
-	}
-}
-
-/**
- * Selects a random address from a comma-separated string or array of addresses
- * @param {string|string[]} addresses - Comma-separated string or array of addresses
- * @returns {string} Selected address
- */
-function selectRandomAddress(addresses) {
-	const addressArray = typeof addresses === 'string' ?
-		addresses.split(',').map(addr => addr.trim()) :
-		addresses;
-	return addressArray[Math.floor(Math.random() * addressArray.length)];
+	<p><em>Thank you for using nginx.</em></p>
+	</body>
+	</html>
+	`
+	return text;
 }
